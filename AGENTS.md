@@ -14,6 +14,12 @@
 - Vite / Node 平行业务实现（含本机项目扫描）
 - 「桌面一套、浏览器一套」的临时修复
 
+### 正式发布（严重）
+
+多端安装包**只走流水线**：`./scripts/release.sh <ver>` 或 push `v*` 标签 → GitHub Actions 矩阵一次打出 macOS / Windows / Linux。
+
+**禁止**智能体本机逐平台 `tauri build`、手工 `attach_files`、或代替流水线「挨个打包」。细则：[docs/RELEASE.md](docs/RELEASE.md)。
+
 架构总览：[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)  
 安全边界：[docs/SECURITY.md](docs/SECURITY.md)  
 验收门禁：[docs/ACCEPTANCE.md](docs/ACCEPTANCE.md)（含传输统一检查项）
@@ -31,3 +37,9 @@ npm run dev:web            # Vite 代理 /api → Agent
 新能力：先加 `AgentService` + `http.rs` 路由，再给 `AgentTransport` 加 HTTP 方法；不要新增第二通道。
 
 桌面壳层：内嵌页可用菜单 **View → Reload Page**（`Cmd/Ctrl+R` / `F5`）或顶栏「刷新页面」；这只重载 WebView，不重启进程，也不走 Agent 业务通道。
+
+## 发布入口（摘要）
+
+```bash
+./scripts/release.sh 0.2.0   # 对齐版本 + 打标签 + push → Actions 出全端包
+```
