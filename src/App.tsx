@@ -9,6 +9,7 @@ import type {
   DashboardSnapshot,
   DeleteCertificateResult,
   DiscoveredProject,
+  DomainPoolRecord,
   PublicConfig,
   SiteStatus,
   UpdateInfo,
@@ -54,6 +55,24 @@ export default function App() {
   const [history, setHistory] = useState<Array<{ cpu: number; memory: number }>>([]);
 
   const transport = useMemo(() => new AgentTransport(connection), [connection]);
+
+  const reloadPage = useCallback(() => {
+    window.location.reload();
+  }, []);
+
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      const key = event.key;
+      const mod = event.metaKey || event.ctrlKey;
+      // Desktop native menu also binds Cmd/Ctrl+R + F5; this covers pure Web / when menu misses.
+      if (key === 'F5' || (mod && key.toLowerCase() === 'r' && !event.altKey)) {
+        event.preventDefault();
+        reloadPage();
+      }
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [reloadPage]);
 
   const refreshSnapshot = useCallback(async (silent = false) => {
     if (!connection.setupComplete) return;
@@ -145,6 +164,7 @@ export default function App() {
   const completeSetup = async (nextConnection: ClientConnection, nextConfig: PublicConfig) => {
     const readyConnection = { ...nextConnection, setupComplete: true };
     const setupTransport = new AgentTransport(readyConnection);
+    const sessionConnection = await setupTransport.ensureSession();
     const existing = await setupTransport.config();
     const saved = await setupTransport.saveConfig({
       ...existing,
@@ -152,8 +172,9 @@ export default function App() {
       language: nextConfig.language,
       configured: Boolean(nextConfig.frameworkRoot || existing.frameworkRoot),
     });
-    saveConnection(readyConnection);
-    setConnection(readyConnection);
+    const finalized = { ...sessionConnection, setupComplete: true };
+    saveConnection(finalized);
+    setConnection(finalized);
     setConfig(saved);
     await applyLocale(saved.language);
   };
@@ -219,7 +240,25 @@ export default function App() {
           </div>
           <div className="topbar-actions">
             <span className="live-chip"><span /> LIVE</span>
-            <button className="icon-button" onClick={() => void refreshSnapshot()} aria-label={t('common.refresh')} disabled={loading}>↻</button>
+            <button
+              type="button"
+              className="icon-button"
+              onClick={() => void refreshSnapshot()}
+              aria-label={t('common.refresh')}
+              title={t('common.refresh')}
+              disabled={loading}
+            >
+              ↻
+            </button>
+            <button
+              type="button"
+              className="icon-button"
+              onClick={reloadPage}
+              aria-label={t('common.reloadPage')}
+              title={`${t('common.reloadPage')} (⌘/Ctrl+R · F5)`}
+            >
+              ⟳
+            </button>
           </div>
         </header>
 
@@ -242,7 +281,12 @@ export default function App() {
         {view === 'instances' && (
           <InstancesView snapshot={snapshot} busyAction={busyAction} onControl={runControl} />
         )}
-        {view === 'websites' && <WebsitesView transport={transport} />}
+        {view === 'websites' && (
+          <WebsitesView
+            transport={transport}
+            adminUrl={snapshot?.adminUrl || config.adminUrl || ''}
+          />
+        )}
         {view === 'sites' && (
           <SitesView
             snapshot={snapshot}
@@ -421,22 +465,42 @@ function InstancesView({ snapshot, busyAction, onControl }: {
   );
 }
 
-function WebsitesView({ transport }: { transport: AgentTransport }) {
+function WebsitesView({
+  transport,
+  adminUrl,
+}: {
+  transport: AgentTransport;
+  adminUrl: string;
+}) {
   const { t } = useTranslation();
   const [items, setItems] = useState<WebsiteRecord[]>([]);
+  const [pool, setPool] = useState<DomainPoolRecord[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [errorKind, setErrorKind] = useState<'load' | 'create'>('load');
   const [creating, setCreating] = useState(false);
   const [open, setOpen] = useState(false);
   const [name, setName] = useState('');
-  const [url, setUrl] = useState('');
+  const [poolId, setPoolId] = useState('');
   const [code, setCode] = useState('');
+
+  const backendDomainUrl = useMemo(() => {
+    const base = (adminUrl || '').trim().replace(/\/$/, '');
+    if (!base) return '';
+    return `${base}/websites/admin/domain/index`;
+  }, [adminUrl]);
+
+  const selectedPool = useMemo(
+    () => pool.find((row) => String(row.poolId) === poolId) || null,
+    [pool, poolId],
+  );
 
   const refresh = useCallback(async () => {
     setLoading(true);
     try {
-      setItems(await transport.websites());
+      const [sites, domains] = await Promise.all([transport.websites(), transport.domainPool()]);
+      setItems(sites);
+      setPool(domains);
       setError('');
     } catch (reason) {
       setErrorKind('load');
@@ -448,13 +512,37 @@ function WebsitesView({ transport }: { transport: AgentTransport }) {
 
   useEffect(() => { void refresh(); }, [refresh]);
 
+  const onPoolChange = (value: string) => {
+    setPoolId(value);
+    const row = pool.find((item) => String(item.poolId) === value);
+    if (!row) return;
+    if (!name.trim()) setName(row.domain.replace(/\./g, ' '));
+    if (!code.trim()) setCode(row.domain.replace(/\./g, '_').toLowerCase());
+  };
+
+  const openBackend = () => {
+    if (!backendDomainUrl) return;
+    void transport.openExternal(backendDomainUrl);
+  };
+
   const submit = async (event: FormEvent) => {
     event.preventDefault();
+    const selectedId = Number(poolId);
+    if (!selectedId || !selectedPool) {
+      setErrorKind('create');
+      setError(t('websites.poolRequired'));
+      return;
+    }
     setCreating(true);
     try {
-      await transport.createWebsite({ name: name.trim(), url: url.trim(), code: code.trim() || undefined });
+      await transport.createWebsite({
+        name: name.trim(),
+        poolId: selectedId,
+        url: selectedPool.domain,
+        code: code.trim() || undefined,
+      });
       setName('');
-      setUrl('');
+      setPoolId('');
       setCode('');
       setOpen(false);
       setError('');
@@ -479,10 +567,27 @@ function WebsitesView({ transport }: { transport: AgentTransport }) {
           <div className="form-grid">
             <label>{t('websites.name')}<input value={name} onChange={(event) => setName(event.target.value)} required autoComplete="off" /></label>
             <label>{t('websites.code')}<input value={code} onChange={(event) => setCode(event.target.value)} placeholder={t('websites.codeHint')} autoComplete="off" /></label>
-            <label className="wide-field">{t('websites.url')}<input value={url} onChange={(event) => setUrl(event.target.value)} required placeholder="shop.example.com" autoComplete="off" /></label>
+            <label className="wide-field">
+              {t('websites.url')}
+              <select value={poolId} onChange={(event) => onPoolChange(event.target.value)} required>
+                <option value="">{t('websites.poolPlaceholder')}</option>
+                {pool.map((row) => (
+                  <option key={row.poolId} value={String(row.poolId)}>{row.domain}</option>
+                ))}
+              </select>
+              <small className="field-hint">
+                {pool.length === 0 ? t('websites.poolEmpty') : t('websites.poolHint')}
+                {backendDomainUrl ? (
+                  <>
+                    {' · '}
+                    <button type="button" className="text-button linkish" onClick={openBackend}>{t('websites.openBackend')}</button>
+                  </>
+                ) : null}
+              </small>
+            </label>
           </div>
           <div className="form-actions">
-            <button className="primary-button" disabled={creating}>{creating ? t('common.loading') : t('websites.save')}</button>
+            <button className="primary-button" disabled={creating || pool.length === 0}>{creating ? t('common.loading') : t('websites.save')}</button>
             <span className="website-create-hint">{t('websites.moduleHint')}</span>
           </div>
         </form>
@@ -681,10 +786,38 @@ function PanelView({ url, transport }: { url: string; transport: AgentTransport 
   const { t } = useTranslation();
   const panelUrl = withWlsPanelPath(url);
   const [embedFailed, setEmbedFailed] = useState(false);
-  useEffect(() => { setEmbedFailed(false); }, [panelUrl]);
+  const [loading, setLoading] = useState(Boolean(panelUrl));
+  const [failReason, setFailReason] = useState<'blocked' | 'empty' | 'timeout'>('blocked');
+  const loadTimerRef = useRef<number | null>(null);
+  const clearLoadTimer = () => {
+    if (loadTimerRef.current !== null) {
+      window.clearTimeout(loadTimerRef.current);
+      loadTimerRef.current = null;
+    }
+  };
+  useEffect(() => {
+    setEmbedFailed(false);
+    setLoading(Boolean(panelUrl));
+    setFailReason('blocked');
+    clearLoadTimer();
+    if (!panelUrl) return undefined;
+    // Cross-origin X-Frame blocks often leave a dark empty iframe with no onError.
+    loadTimerRef.current = window.setTimeout(() => {
+      setFailReason('timeout');
+      setEmbedFailed(true);
+      setLoading(false);
+      loadTimerRef.current = null;
+    }, 8000);
+    return () => clearLoadTimer();
+  }, [panelUrl]);
   const openPanel = () => {
     if (panelUrl) void transport.openExternal(panelUrl);
   };
+  const failMessage = failReason === 'timeout'
+    ? t('panel.embedTimeout')
+    : failReason === 'empty'
+      ? t('panel.embedEmpty')
+      : t('panel.embedBlocked');
   return (
     <Page title={t('panel.title')} subtitle={t('panel.subtitle')} action={panelUrl ? <button type="button" className="secondary-button" onClick={openPanel}>{t('common.open')} ↗</button> : undefined}>
       {panelUrl ? (
@@ -692,27 +825,35 @@ function PanelView({ url, transport }: { url: string; transport: AgentTransport 
           <div className="embedded-panel panel-fallback">
             <div className="empty-state">
               <span>◇</span>
-              <p>{t('panel.embedBlocked')}</p>
+              <p>{failMessage}</p>
               <button type="button" className="primary-button" onClick={openPanel}>{t('panel.openWindow')}</button>
             </div>
           </div>
         ) : (
           <div className="embedded-panel">
-            <div className="frame-notice">{t('panel.frameHint')}</div>
+            <div className="frame-notice">{loading ? t('panel.loading') : t('panel.frameHint')}</div>
             <iframe
               title={t('panel.title')}
               src={panelUrl}
               referrerPolicy="origin"
               sandbox="allow-same-origin allow-scripts allow-forms allow-popups allow-popups-to-escape-sandbox allow-downloads"
-              onError={() => setEmbedFailed(true)}
+              onError={() => {
+                clearLoadTimer();
+                setFailReason('blocked');
+                setEmbedFailed(true);
+                setLoading(false);
+              }}
               onLoad={(event) => {
+                clearLoadTimer();
+                setLoading(false);
                 try {
                   const doc = event.currentTarget.contentDocument;
                   if (doc && doc.body && doc.body.childElementCount === 0 && !doc.body.innerText.trim()) {
+                    setFailReason('empty');
                     setEmbedFailed(true);
                   }
                 } catch {
-                  /* cross-origin success: the document loaded and is protected */
+                  /* cross-origin: headers may still allow paint; keep iframe */
                 }
               }}
             />

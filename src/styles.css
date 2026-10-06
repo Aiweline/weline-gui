@@ -192,8 +192,8 @@ code, pre, .prompt { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, C
 .exit-success { color: var(--mint); }.exit-error { color: var(--danger); }
 .terminal-output pre { margin: 0; padding: 20px; color: #b7c9c0; font-size: 10px; line-height: 1.55; white-space: pre; overflow: auto; max-height: 560px; font-variant-ligatures: none; }
 .embedded-panel { border: 1px solid var(--line); border-radius: var(--radius-md); overflow: hidden; background: var(--panel); }
-.frame-notice { padding: 9px 13px; color: var(--muted); border-bottom: 1px solid var(--line); font-size: 9px; }
-.embedded-panel iframe { display: block; width: 100%; height: calc(100vh - 220px); min-height: 620px; border: 0; background: var(--bg-elevated); }
+.frame-notice { padding: 11px 14px; color: var(--soft); border-bottom: 1px solid var(--line); font-size: 10px; letter-spacing: 0.02em; background: rgba(101, 214, 160, 0.04); }
+.embedded-panel iframe { display: block; width: 100%; height: calc(100vh - 220px); min-height: 620px; border: 0; background: linear-gradient(180deg, rgba(8, 16, 15, 0.96), var(--bg-elevated)); }
 .panel-fallback { min-height: 420px; display: grid; place-items: center; }
 .panel-fallback .empty-state a { margin-top: 16px; }
 
@@ -213,6 +213,8 @@ code, pre, .prompt { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, C
 .form-grid, .compact-fields { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; }
 .form-grid label, .compact-fields label, .settings-fields > label { display: grid; gap: 7px; color: var(--muted); font-size: 9px; }
 .wide-field { grid-column: 1 / -1; }
+.field-hint { color: var(--muted); font-size: 9px; line-height: 1.55; }
+.field-hint .text-button.linkish { font-size: inherit; }
 input, textarea, select { width: 100%; border: 1px solid var(--line); border-radius: 11px; color: var(--text); background: rgba(4, 11, 10, 0.55); padding: 11px 12px; outline: 0; font-size: 11px; transition: border 160ms ease, box-shadow 160ms ease; }
 input:focus, textarea:focus, select:focus { border-color: rgba(216, 245, 109, 0.4); box-shadow: 0 0 0 3px rgba(216, 245, 109, 0.055); }
 textarea { resize: vertical; }
