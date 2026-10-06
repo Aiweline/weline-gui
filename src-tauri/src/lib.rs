@@ -8,150 +8,84 @@ pub mod tls;
 pub mod update;
 
 use config::ConfigStore;
-use models::{
-    CommandResult, ControlRequest, CreateWebsiteRequest, DashboardSnapshot, DeleteCertificateRequest,
-    DeleteCertificateResult, DiscoveredProject, PublicConfig, UpdateInfo, WebsiteRecord,
-};
+use models::LocalAgentEndpoint;
+use serde::Serialize;
 use service::AgentService;
+use std::fs;
+use std::path::PathBuf;
 use tauri::State;
 
 #[derive(Clone)]
 struct AppState {
     service: AgentService,
+    agent_url: String,
 }
 
+/// Sole desktop IPC: return loopback Agent HTTP endpoint + bearer token.
+/// All business traffic goes through `/api/v1/*` on that endpoint.
 #[tauri::command]
-async fn get_public_config(state: State<'_, AppState>) -> Result<PublicConfig, String> {
-    Ok(state.service.public_config().await)
-}
-
-#[tauri::command]
-async fn save_public_config(
-    state: State<'_, AppState>,
-    config: PublicConfig,
-) -> Result<PublicConfig, String> {
-    state
-        .service
-        .update_config(config)
-        .await
-        .map_err(|error| error.to_string())
-}
-
-#[tauri::command]
-async fn get_snapshot(state: State<'_, AppState>) -> Result<DashboardSnapshot, String> {
-    state
-        .service
-        .snapshot()
-        .await
-        .map_err(|error| error.to_string())
-}
-
-#[tauri::command]
-async fn control_wls(
-    state: State<'_, AppState>,
-    request: ControlRequest,
-) -> Result<CommandResult, String> {
-    state
-        .service
-        .control(&request.action, request.instance.as_deref())
-        .await
-        .map_err(|error| error.to_string())
-}
-
-#[tauri::command]
-async fn run_framework_command(
-    state: State<'_, AppState>,
-    command: String,
-) -> Result<CommandResult, String> {
-    state
-        .service
-        .execute_console(&command)
-        .await
-        .map_err(|error| error.to_string())
-}
-
-#[tauri::command]
-async fn check_for_update(state: State<'_, AppState>) -> Result<UpdateInfo, String> {
-    state
-        .service
-        .check_update()
-        .await
-        .map_err(|error| error.to_string())
-}
-
-#[tauri::command]
-async fn scan_local_projects() -> Result<Vec<DiscoveredProject>, String> {
-    Ok(tokio::task::spawn_blocking(discover::scan_local_projects)
-        .await
-        .map_err(|error| error.to_string())?)
-}
-
-#[tauri::command]
-async fn list_websites(state: State<'_, AppState>) -> Result<Vec<WebsiteRecord>, String> {
-    state
-        .service
-        .list_websites()
-        .await
-        .map_err(|error| error.to_string())
-}
-
-#[tauri::command]
-async fn create_website(
-    state: State<'_, AppState>,
-    request: CreateWebsiteRequest,
-) -> Result<WebsiteRecord, String> {
-    state
-        .service
-        .create_website(request)
-        .await
-        .map_err(|error| error.to_string())
-}
-
-#[tauri::command]
-async fn delete_certificate(
-    state: State<'_, AppState>,
-    request: DeleteCertificateRequest,
-) -> Result<DeleteCertificateResult, String> {
-    state
-        .service
-        .delete_certificate(request)
-        .await
-        .map_err(|error| error.to_string())
-}
-
-#[tauri::command]
-async fn open_external_url(url: String) -> Result<(), String> {
-    tokio::task::spawn_blocking(move || AgentService::open_external_url(&url))
-        .await
-        .map_err(|error| error.to_string())?
-        .map_err(|error| error.to_string())
+async fn get_local_agent_endpoint(state: State<'_, AppState>) -> Result<LocalAgentEndpoint, String> {
+    let config = state.service.config().await;
+    Ok(LocalAgentEndpoint {
+        agent_url: state.agent_url.clone(),
+        token: config.access_token,
+        listen: config.listen,
+    })
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     let store = ConfigStore::system_default().expect("unable to resolve Weline GUI configuration");
-    let config = store
+    let mut config = store
         .load_or_create()
         .expect("unable to load Weline GUI configuration");
-    let state = AppState {
-        service: AgentService::new(config, store),
-    };
+    if ConfigStore::ensure_client_origins(&mut config) {
+        store
+            .save(&config)
+            .expect("unable to persist allowed origins");
+    }
+
+    let listen = config.listen.clone();
+    let agent_url = format!("http://{listen}");
+    let service = AgentService::new(config, store.clone());
+    let http_service = service.clone();
+    let web_root = agent_web_root();
+
+    tauri::async_runtime::spawn(async move {
+        if let Err(error) = http::serve(http_service, &listen, web_root, None, None).await {
+            tracing::error!(error = %error, listen = %listen, "embedded agent HTTP failed");
+        }
+    });
+
+    let state = AppState { service, agent_url };
 
     tauri::Builder::default()
         .manage(state)
-        .invoke_handler(tauri::generate_handler![
-            get_public_config,
-            save_public_config,
-            get_snapshot,
-            control_wls,
-            run_framework_command,
-            check_for_update,
-            scan_local_projects,
-            list_websites,
-            create_website,
-            delete_certificate,
-            open_external_url,
-        ])
+        .invoke_handler(tauri::generate_handler![get_local_agent_endpoint])
         .run(tauri::generate_context!())
         .expect("error while running Weline GUI");
+}
+
+fn agent_web_root() -> PathBuf {
+    let dist = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../dist");
+    if dist.join("index.html").is_file() {
+        return dist;
+    }
+    let dir = std::env::temp_dir().join("weline-gui-agent-static");
+    let _ = fs::create_dir_all(&dir);
+    let index = dir.join("index.html");
+    if !index.is_file() {
+        let _ = fs::write(
+            &index,
+            b"<!doctype html><meta charset=\"utf-8\"><title>Weline Agent</title><p>Weline Agent API</p>",
+        );
+    }
+    dir
+}
+
+/// Keep Serialize import used when LocalAgentEndpoint is the only IPC payload.
+#[allow(dead_code)]
+fn _assert_endpoint_serialize() {
+    fn assert_serialize<T: Serialize>() {}
+    assert_serialize::<LocalAgentEndpoint>();
 }

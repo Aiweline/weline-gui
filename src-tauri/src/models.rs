@@ -283,6 +283,20 @@ pub struct HealthResponse {
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
+pub struct LocalAgentEndpoint {
+    pub agent_url: String,
+    pub token: String,
+    pub listen: String,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct OpenExternalRequest {
+    pub url: String,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct DiscoveredProject {
     pub name: String,
     pub framework_root: PathBuf,

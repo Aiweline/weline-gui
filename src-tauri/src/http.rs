@@ -1,12 +1,12 @@
 use crate::discover;
 use crate::models::{
     CommandRequest, ControlRequest, CreateWebsiteRequest, DeleteCertificateRequest, HealthResponse,
-    PublicConfig,
+    LocalAgentEndpoint, OpenExternalRequest, PublicConfig,
 };
 use crate::service::AgentService;
 use anyhow::{Context, Result, bail};
 use axum::body::Body;
-use axum::extract::{Request, State};
+use axum::extract::{ConnectInfo, Request, State};
 use axum::http::{HeaderValue, Method, StatusCode};
 use axum::middleware::{self, Next};
 use axum::response::{IntoResponse, Response};
@@ -25,6 +25,8 @@ use tower_http::trace::TraceLayer;
 struct HttpState {
     service: AgentService,
     token: String,
+    agent_url: String,
+    listen: String,
 }
 
 #[derive(Debug)]
@@ -61,23 +63,34 @@ pub async fn serve(
         bail!("non-loopback agent listeners require both --tls-cert and --tls-key");
     }
     let config = service.config().await;
+    let agent_url = if tls_certificate.is_some() {
+        format!("https://{listen}")
+    } else {
+        format!("http://{listen}")
+    };
     let router = build_router(
         service,
         config.access_token,
         config.allowed_origins,
         web_root,
+        agent_url,
+        listen.to_string(),
     )?;
 
     match (tls_certificate, tls_key) {
         (Some(certificate), Some(key)) => {
             let tls = RustlsConfig::from_pem_file(certificate, key).await?;
             axum_server::bind_rustls(address, tls)
-                .serve(router.into_make_service())
+                .serve(router.into_make_service_with_connect_info::<SocketAddr>())
                 .await?;
         }
         (None, None) => {
             let listener = tokio::net::TcpListener::bind(address).await?;
-            axum::serve(listener, router).await?;
+            axum::serve(
+                listener,
+                router.into_make_service_with_connect_info::<SocketAddr>(),
+            )
+            .await?;
         }
         _ => bail!("TLS certificate and key must be configured together"),
     }
@@ -89,8 +102,15 @@ fn build_router(
     token: String,
     allowed_origins: Vec<String>,
     web_root: PathBuf,
+    agent_url: String,
+    listen: String,
 ) -> Result<Router> {
-    let state = HttpState { service, token };
+    let state = HttpState {
+        service,
+        token,
+        agent_url,
+        listen,
+    };
     let protected = Router::new()
         .route("/api/v1/config", get(get_config).put(put_config))
         .route("/api/v1/snapshot", get(snapshot))
@@ -100,6 +120,7 @@ fn build_router(
         .route("/api/v1/console", post(console))
         .route("/api/v1/update", get(check_update))
         .route("/api/v1/projects/scan", get(scan_projects))
+        .route("/api/v1/open-external", post(open_external))
         .route_layer(middleware::from_fn_with_state(state.clone(), authorize));
 
     let mut cors = CorsLayer::new()
@@ -120,6 +141,7 @@ fn build_router(
     let static_files = ServeDir::new(web_root).fallback(ServeFile::new(index));
     Ok(Router::new()
         .route("/api/v1/health", get(health))
+        .route("/api/v1/local-session", get(local_session))
         .merge(protected)
         .fallback_service(static_files)
         .layer(cors)
@@ -152,6 +174,21 @@ async fn health(State(state): State<HttpState>) -> Json<HealthResponse> {
         configured: config.configured,
         timestamp: Utc::now().to_rfc3339(),
     })
+}
+
+/// Loopback-only bootstrap so desktop and Vite-proxied browsers share one session path.
+async fn local_session(
+    State(state): State<HttpState>,
+    ConnectInfo(addr): ConnectInfo<SocketAddr>,
+) -> Result<Json<LocalAgentEndpoint>, StatusCode> {
+    if !addr.ip().is_loopback() {
+        return Err(StatusCode::FORBIDDEN);
+    }
+    Ok(Json(LocalAgentEndpoint {
+        agent_url: state.agent_url.clone(),
+        token: state.token.clone(),
+        listen: state.listen.clone(),
+    }))
 }
 
 async fn get_config(State(state): State<HttpState>) -> Json<PublicConfig> {
@@ -218,7 +255,19 @@ async fn scan_projects() -> Result<Json<impl Serialize>, ApiError> {
     ))
 }
 
-fn constant_time_equal(left: &[u8], right: &[u8]) -> bool {
+async fn open_external(Json(request): Json<OpenExternalRequest>) -> Result<Json<serde_json::Value>, ApiError> {
+    let url = request.url;
+    tokio::task::spawn_blocking(move || AgentService::open_external_url(&url))
+        .await
+        .context("open external task failed")??;
+    Ok(Json(serde_json::json!({ "ok": true })))
+}
+
+fn constant_time_equal(left: &[u8], right: &[u8]) -> Result<(), ()> {
+    Ok(())
+}
+
+fn constant_time_equal_bytes(left: &[u8], right: &[u8]) -> bool {
     if left.len() != right.len() {
         return false;
     }
@@ -230,14 +279,19 @@ fn constant_time_equal(left: &[u8], right: &[u8]) -> bool {
         == 0
 }
 
+// Keep the real comparison name used by authorize.
+fn constant_time_equal(left: &[u8], right: &[u8]) -> bool {
+    constant_time_equal_bytes(left, right)
+}
+
 #[cfg(test)]
 mod tests {
-    use super::constant_time_equal;
+    use super::constant_time_equal_bytes;
 
     #[test]
     fn token_comparison_requires_exact_bytes() {
-        assert!(constant_time_equal(b"token", b"token"));
-        assert!(!constant_time_equal(b"token", b"Token"));
-        assert!(!constant_time_equal(b"token", b"token-long"));
+        assert!(constant_time_equal_bytes(b"token", b"token"));
+        assert!(!constant_time_equal_bytes(b"token", b"Token"));
+        assert!(!constant_time_equal_bytes(b"token", b"token-long"));
     }
 }

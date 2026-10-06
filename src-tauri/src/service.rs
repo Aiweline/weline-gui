@@ -293,25 +293,52 @@ impl AgentService {
         serde_json::from_str(json).context("website:listing returned an unsupported JSON schema")
     }
 
+    pub async fn list_domain_pool(&self) -> Result<Vec<DomainPoolRecord>> {
+        let result = self
+            .run_weline_args(&["website:domain-pool", "--json"], Duration::from_secs(30))
+            .await?;
+        if result.exit_code != 0 {
+            bail!("website:domain-pool failed: {}", result.stderr.trim());
+        }
+        let json = extract_cli_json(&result, "website:domain-pool")?;
+        serde_json::from_str(json).context("website:domain-pool returned an unsupported JSON schema")
+    }
+
     pub async fn create_website(&self, request: CreateWebsiteRequest) -> Result<WebsiteRecord> {
         let name = request.name.trim();
-        let url = request.url.trim();
-        if name.is_empty() || url.is_empty() {
-            bail!("website name and URL are required");
+        if name.is_empty() {
+            bail!("website name is required");
+        }
+        let pool_id = request.pool_id.unwrap_or(0);
+        let url = request
+            .url
+            .as_deref()
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .unwrap_or("");
+        if pool_id <= 0 && url.is_empty() {
+            bail!("select a domain from the pool (or provide a URL)");
         }
         let mut owned = vec![
             "website:create".to_string(),
             format!("--name={name}"),
-            format!("--url={url}"),
             "--json".to_string(),
         ];
+        if pool_id > 0 {
+            owned.insert(2, format!("--pool-id={pool_id}"));
+        }
+        if !url.is_empty() {
+            let insert_at = if pool_id > 0 { 3 } else { 2 };
+            owned.insert(insert_at, format!("--url={url}"));
+        }
         if let Some(code) = request
             .code
             .as_deref()
             .map(str::trim)
             .filter(|value| !value.is_empty())
         {
-            owned.insert(3, format!("--code={code}"));
+            let insert_at = owned.len() - 1;
+            owned.insert(insert_at, format!("--code={code}"));
         }
         let args: Vec<&str> = owned.iter().map(String::as_str).collect();
         let result = self.run_weline_args(&args, Duration::from_secs(90)).await?;
