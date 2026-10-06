@@ -1,10 +1,12 @@
 # 安全模型
 
+与传输架构对齐的硬约束见 [AGENT_HTTP_UNIFIED.md](AGENT_HTTP_UNIFIED.md)：桌面与 Web **不得**绕过 Agent HTTP 另开业务通道；本机引导仅限 loopback（`local-session` / 桌面注入 endpoint）。
+
 ## 默认边界
 
 - Headless 代理默认只监听 `127.0.0.1:17640`。
 - 监听非回环地址时，缺少证书或私钥会直接拒绝启动。
-- 除健康检查外，API 使用逐字节恒定时间比较的 Bearer Token 鉴权。
+- 除健康检查与 **loopback-only** `GET /api/v1/local-session` 外，API 使用逐字节恒定时间比较的 Bearer Token 鉴权。
 - 安装时生成随机令牌；使用 `weline-agent token --rotate` 可立即轮换。
 - 配置 API 永远不返回令牌。
 

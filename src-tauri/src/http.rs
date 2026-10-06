@@ -116,6 +116,7 @@ fn build_router(
         .route("/api/v1/snapshot", get(snapshot))
         .route("/api/v1/wls/control", post(control))
         .route("/api/v1/websites", get(list_websites).post(create_website))
+        .route("/api/v1/websites/domain-pool", get(list_domain_pool))
         .route("/api/v1/certificates/delete", post(delete_certificate))
         .route("/api/v1/console", post(console))
         .route("/api/v1/update", get(check_update))
@@ -222,6 +223,10 @@ async fn list_websites(State(state): State<HttpState>) -> Result<Json<impl Seria
     Ok(Json(state.service.list_websites().await?))
 }
 
+async fn list_domain_pool(State(state): State<HttpState>) -> Result<Json<impl Serialize>, ApiError> {
+    Ok(Json(state.service.list_domain_pool().await?))
+}
+
 async fn create_website(
     State(state): State<HttpState>,
     Json(request): Json<CreateWebsiteRequest>,
@@ -263,11 +268,7 @@ async fn open_external(Json(request): Json<OpenExternalRequest>) -> Result<Json<
     Ok(Json(serde_json::json!({ "ok": true })))
 }
 
-fn constant_time_equal(left: &[u8], right: &[u8]) -> Result<(), ()> {
-    Ok(())
-}
-
-fn constant_time_equal_bytes(left: &[u8], right: &[u8]) -> bool {
+fn constant_time_equal(left: &[u8], right: &[u8]) -> bool {
     if left.len() != right.len() {
         return false;
     }
@@ -279,19 +280,14 @@ fn constant_time_equal_bytes(left: &[u8], right: &[u8]) -> bool {
         == 0
 }
 
-// Keep the real comparison name used by authorize.
-fn constant_time_equal(left: &[u8], right: &[u8]) -> bool {
-    constant_time_equal_bytes(left, right)
-}
-
 #[cfg(test)]
 mod tests {
-    use super::constant_time_equal_bytes;
+    use super::constant_time_equal;
 
     #[test]
     fn token_comparison_requires_exact_bytes() {
-        assert!(constant_time_equal_bytes(b"token", b"token"));
-        assert!(!constant_time_equal_bytes(b"token", b"Token"));
-        assert!(!constant_time_equal_bytes(b"token", b"token-long"));
+        assert!(constant_time_equal(b"token", b"token"));
+        assert!(!constant_time_equal(b"token", b"Token"));
+        assert!(!constant_time_equal(b"token", b"token-long"));
     }
 }

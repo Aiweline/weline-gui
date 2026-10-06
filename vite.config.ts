@@ -1,13 +1,19 @@
 import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
-import { viteLocalScanPlugin } from './scripts/vite-local-scan-plugin.mjs';
 
 export default defineConfig({
-  plugins: [react(), viteLocalScanPlugin()],
+  plugins: [react()],
   clearScreen: false,
   server: {
     port: 1420,
     strictPort: true,
+    proxy: {
+      // Browser and Tauri webview both use /api/v1/* → same AgentService as weline-agent.
+      '/api': {
+        target: 'http://127.0.0.1:17640',
+        changeOrigin: true,
+      },
+    },
   },
   envPrefix: ['VITE_', 'TAURI_'],
   build: {

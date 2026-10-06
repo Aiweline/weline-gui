@@ -4,6 +4,18 @@
 验收宿主：macOS arm64  
 框架目录：`/Users/weline/Project/Official/框架`
 
+## 传输统一（硬门禁）
+
+桌面与浏览器本机模式必须走同一套 Agent HTTP，不得分叉业务通道。权威：[AGENT_HTTP_UNIFIED.md](AGENT_HTTP_UNIFIED.md)。
+
+验收时至少核对：
+
+- [ ] `curl -sS http://127.0.0.1:17640/api/v1/health` 返回 JSON（非 SPA HTML）。
+- [ ] 受保护接口带 Bearer：`GET /api/v1/projects/scan` 返回 `projects` 数组；响应不得为 HTML。
+- [ ] Vite `:1420` 同源 `/api/v1/...` 与桌面内嵌 Agent 行为一致（代理到同一 `AgentService`）。
+- [ ] 前端无业务 `invoke`；仅允许引导级 `get_local_agent_endpoint`（若存在）。
+- [ ] 仓库无复活的 Node「本机扫描」平行实现（如已删除的 `local-project-scan.mjs` / Vite scan plugin）。
+
 ## 自动化验证
 
 - React/Vitest：10 种语言、阿拉伯语 RTL、中文证书提示等契约通过。

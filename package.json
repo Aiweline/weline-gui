@@ -5,6 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
+    "dev:web": "npm run dev -- --host 127.0.0.1",
     "build": "tsc -b && vite build",
     "test": "vitest run",
     "test:watch": "vitest",

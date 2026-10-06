@@ -24,10 +24,29 @@ describe('locale catalog', () => {
     expect(localeCatalog.en.messages.websites.loadErrorHint).toContain('Settings');
   });
 
+  it('points website creation at the domain pool in Chinese', () => {
+    expect(localeCatalog['zh-CN'].messages.websites.poolPlaceholder).toContain('域名池');
+    expect(localeCatalog['zh-CN'].messages.websites.openBackend).toContain('后台');
+    expect(localeCatalog.en.messages.websites.poolHint).toContain('backend');
+  });
+
+  it('marks the public gateway owner in Chinese instance copy', () => {
+    expect(localeCatalog['zh-CN'].messages.instances.gateway).toBe('公网网关');
+    expect(localeCatalog['zh-CN'].messages.instances.gatewayOwnerSelf).toBe('本机网关');
+    expect(localeCatalog['zh-CN'].messages.instances.gatewayOwnerChip).toBe('网关');
+  });
+
   it('explains local project scanning in Chinese setup copy', () => {
     expect(localeCatalog['zh-CN'].messages.setup.scanHint).toContain('自动扫描');
     expect(localeCatalog['zh-CN'].messages.setup.customAdd).toBe('自定义新增');
     expect(localeCatalog['zh-CN'].messages.setup.scanRequiresDesktop).toContain('桌面客户端');
     expect(localeCatalog.en.messages.setup.running).toBeTruthy();
+  });
+
+  it('distinguishes data refresh from full page reload', () => {
+    expect(localeCatalog.en.messages.common.reloadPage).toBe('Reload page');
+    expect(localeCatalog['zh-CN'].messages.common.reloadPage).toBe('刷新页面');
+    expect(localeCatalog.en.messages.common.refresh).toBe('Refresh data');
+    expect(localeCatalog['zh-CN'].messages.common.refresh).toBe('刷新数据');
   });
 });

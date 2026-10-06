@@ -1,6 +1,7 @@
 import { FormEvent, ReactNode, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { AgentTransport, loadConnection, saveConnection } from './api/transport';
+import { backendDomainPoolUrl } from './api/projects';
 import { applyLocale } from './i18n';
 import { localeCatalog, normalizeLocale } from './i18n/catalog';
 import type {
@@ -252,12 +253,16 @@ export default function App() {
             </button>
             <button
               type="button"
-              className="icon-button"
+              className="chrome-reload-button"
               onClick={reloadPage}
               aria-label={t('common.reloadPage')}
               title={`${t('common.reloadPage')} (⌘/Ctrl+R · F5)`}
             >
-              ⟳
+              <svg className="chrome-reload-glyph" viewBox="0 0 16 16" aria-hidden="true" focusable="false">
+                <rect x="3" y="2" width="10" height="12" rx="1.5" fill="none" stroke="currentColor" strokeWidth="1.4" />
+                <path d="M6 6.2h4M6 8.5h2.6" fill="none" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" />
+              </svg>
+              <span>{t('common.reloadPage')}</span>
             </button>
           </div>
         </header>
@@ -411,7 +416,14 @@ function InstancesView({ snapshot, busyAction, onControl }: {
       <div className="instance-list">
         {instances.length === 0 && <EmptyState>{t('common.noData')}</EmptyState>}
         {instances.map((instance) => (
-          <article className={instance.isRunning ? 'instance-card online' : 'instance-card'} key={instance.name}>
+          <article
+            className={[
+              'instance-card',
+              instance.isRunning ? 'online' : '',
+              instance.edgeOwnerSelf ? 'gateway-owner' : '',
+            ].filter(Boolean).join(' ')}
+            key={instance.name}
+          >
             <div className="instance-identity">
               <span className={instance.isRunning ? 'instance-pulse' : 'instance-pulse stopped'} />
               <div>
@@ -422,6 +434,9 @@ function InstancesView({ snapshot, busyAction, onControl }: {
                   <span className={instance.workerDirect || instance.topology === 'direct' ? 'edge-chip topology-direct' : 'edge-chip'}>
                     {instance.workerDirect || instance.topology === 'direct' ? t('instances.workerDirect') : (instance.topologyLabel || t('instances.dispatcher'))}
                   </span>
+                  {instance.edgeOwnerSelf && (
+                    <span className="edge-chip role-gateway">{t('instances.gatewayOwnerChip')}</span>
+                  )}
                 </div>
               </div>
             </div>
@@ -437,8 +452,8 @@ function InstancesView({ snapshot, busyAction, onControl }: {
             </div>
             <div className="instance-stat">
               <span>{t('instances.gateway')}</span>
-              <strong>{instance.edgeOwner || '—'}</strong>
-              <small>{instance.edgeOwnerSelf ? t('instances.thisInstance') : (instance.edgeOwner ? t('instances.joinedGateway') : t('instances.noGateway'))}</small>
+              <strong>{gatewayRoleTitle(instance, t)}</strong>
+              <small>{gatewayRoleHint(instance, t)}</small>
             </div>
             <div className="instance-stat">
               <span>{t('instances.masterPid')}</span>
@@ -484,11 +499,7 @@ function WebsitesView({
   const [poolId, setPoolId] = useState('');
   const [code, setCode] = useState('');
 
-  const backendDomainUrl = useMemo(() => {
-    const base = (adminUrl || '').trim().replace(/\/$/, '');
-    if (!base) return '';
-    return `${base}/websites/admin/domain/index`;
-  }, [adminUrl]);
+  const backendDomainUrl = useMemo(() => backendDomainPoolUrl(adminUrl), [adminUrl]);
 
   const selectedPool = useMemo(
     () => pool.find((row) => String(row.poolId) === poolId) || null,
@@ -1132,6 +1143,24 @@ function edgeFaceLabel(face: string | undefined, t: (key: string) => string): st
   if (face === 'managed_nginx') return t('instances.nginx');
   if (face === 'gateway') return t('instances.sharedGateway');
   return t('instances.pureWls');
+}
+
+function gatewayRoleTitle(instance: WlsInstance, t: (key: string) => string): string {
+  if (instance.edgeOwnerSelf) return t('instances.gatewayOwnerSelf');
+  if (instance.edgeOwner) return instance.edgeOwner;
+  return '—';
+}
+
+function gatewayRoleHint(instance: WlsInstance, t: (key: string, options?: Record<string, unknown>) => string): string {
+  if (instance.edgeOwnerSelf) {
+    return instance.edgeFace === 'gateway'
+      ? t('instances.gatewayOwnsShared')
+      : t('instances.gatewayOwnsNginx');
+  }
+  if (instance.edgeOwner) {
+    return t('instances.gatewayJoined', { name: instance.edgeOwner });
+  }
+  return t('instances.noGateway');
 }
 
 function publicEndpoint(instance: WlsInstance): string {

@@ -39,7 +39,11 @@ npm run check
 npm run tauri dev
 ```
 
-首次启动时选择语言，桌面端选择“管理本机”。本机模式会自动扫描已启动和附近的 Weline 项目，默认选中当前正在运行的项目；也可以自定义新增。线上/远程模式才需要填写宿主代理地址和令牌。
+**硬约束**：桌面 / Vite Web / `weline-agent` 的业务 I/O **必须统一**走 Agent HTTP（`/api/v1/*` → `AgentService`）。禁止再为 Web 另写 Node 扫描，或为桌面另写业务 `invoke`。详见 [docs/AGENT_HTTP_UNIFIED.md](docs/AGENT_HTTP_UNIFIED.md)。
+
+`tauri dev` 会在进程内嵌 `127.0.0.1:17640`；纯浏览器调试时另开终端 `npm run agent`，再 `npm run dev:web`（Vite 将 `/api` 代理到同一 Agent）。
+
+首次启动时选择语言，桌面端选择“管理本机”。本机模式经 `GET /api/v1/projects/scan` 扫描已启动和附近的 Weline 项目，默认选中当前正在运行的项目；也可以自定义新增。线上/远程模式才需要填写宿主代理地址和令牌。
 
 ## 无桌面 Linux
 
@@ -72,10 +76,12 @@ weline-agent token --rotate
 
 ## 文档
 
+- **[硬约束：统一 Agent HTTP](docs/AGENT_HTTP_UNIFIED.md)**（改接口前必读）
 - [架构与数据流](docs/ARCHITECTURE.md)
 - [安全模型](docs/SECURITY.md)
 - [构建与发布](docs/RELEASE.md)
 - [运行验收记录](docs/ACCEPTANCE.md)
+- [Agent 入口](AGENTS.md)
 
 ## 常用命令
 

@@ -90,6 +90,7 @@ async fn main() -> Result<()> {
             if let Some(value) = token {
                 config.access_token = value;
             }
+            let _ = ConfigStore::ensure_client_origins(&mut config);
             store.save(&config)?;
             let listen = config.listen.clone();
             let service = AgentService::new(config, store);

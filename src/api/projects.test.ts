@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   DEFAULT_LOCAL_AGENT_URL,
+  backendDomainPoolUrl,
   isFrontendOnlyOrigin,
   normalizeDiscoveredProjects,
 } from './projects';
@@ -40,5 +41,31 @@ describe('isFrontendOnlyOrigin', () => {
   it('detects Vite origin so local scan never hits the SPA host', () => {
     expect(isFrontendOnlyOrigin('http://127.0.0.1:1420', 'http://127.0.0.1:1420')).toBe(true);
     expect(isFrontendOnlyOrigin(DEFAULT_LOCAL_AGENT_URL, 'http://127.0.0.1:1420')).toBe(false);
+  });
+});
+
+describe('backendDomainPoolUrl', () => {
+  it('strips WLS panel path before joining websites domain admin', () => {
+    expect(
+      backendDomainPoolUrl(
+        'https://p05113ef3.test.weline.com/jRaxfEJaRUyO6ZBOA3wJX8bituje6oqH/server/backend/wls-panel',
+      ),
+    ).toBe(
+      'https://p05113ef3.test.weline.com/jRaxfEJaRUyO6ZBOA3wJX8bituje6oqH/websites/admin/domain/index',
+    );
+  });
+
+  it('keeps an already-admin base without inventing a second panel segment', () => {
+    expect(
+      backendDomainPoolUrl(
+        'https://p05113ef3.test.weline.com/jRaxfEJaRUyO6ZBOA3wJX8bituje6oqH/',
+      ),
+    ).toBe(
+      'https://p05113ef3.test.weline.com/jRaxfEJaRUyO6ZBOA3wJX8bituje6oqH/websites/admin/domain/index',
+    );
+  });
+
+  it('returns empty when admin URL is missing', () => {
+    expect(backendDomainPoolUrl('')).toBe('');
   });
 });

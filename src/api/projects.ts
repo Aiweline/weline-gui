@@ -71,6 +71,25 @@ export function isFrontendOnlyOrigin(candidate: string, pageOrigin = typeof wind
 
 export const DEFAULT_LOCAL_AGENT_URL = 'http://127.0.0.1:17640';
 
+/**
+ * Control Center `adminUrl` points at the WLS panel
+ * (`…/{backendPrefix}/server/backend/wls-panel`). Backend module pages live under
+ * `…/{backendPrefix}/…`, so strip the panel suffix before joining routes.
+ */
+export function backendAdminBaseFromPanelUrl(adminUrl: string): string {
+  const raw = adminUrl.trim().replace(/\/+$/, '');
+  if (!raw) return '';
+  const stripped = raw.replace(/\/server\/backend\/wls-panel(?:\/.*)?$/i, '');
+  return stripped.replace(/\/+$/, '') || raw;
+}
+
+/** Absolute backend URL for Websites domain pool management. */
+export function backendDomainPoolUrl(adminUrl: string): string {
+  const base = backendAdminBaseFromPanelUrl(adminUrl);
+  if (!base) return '';
+  return `${base}/websites/admin/domain/index`;
+}
+
 export async function waitForTauri(timeoutMs = 1500): Promise<boolean> {
   if (typeof window === 'undefined') return false;
   if ('__TAURI_INTERNALS__' in window) return true;

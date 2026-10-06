@@ -9,7 +9,6 @@ pub mod update;
 
 use config::ConfigStore;
 use models::LocalAgentEndpoint;
-use serde::Serialize;
 use service::AgentService;
 use std::fs;
 use std::path::PathBuf;
@@ -31,6 +30,47 @@ async fn get_local_agent_endpoint(state: State<'_, AppState>) -> Result<LocalAge
         token: config.access_token,
         listen: config.listen,
     })
+}
+
+const MENU_RELOAD_PAGE: &str = "reload_page";
+
+#[cfg(desktop)]
+fn install_desktop_chrome_menu(app: &tauri::AppHandle) -> tauri::Result<()> {
+    use tauri::menu::{Menu, MenuItem, MenuItemKind, Submenu};
+
+    let reload = MenuItem::with_id(
+        app,
+        MENU_RELOAD_PAGE,
+        "Reload Page",
+        true,
+        Some("CmdOrCtrl+R"),
+    )?;
+
+    let menu = Menu::default(app)?;
+    let mut view_found = false;
+    for item in menu.items()? {
+        if let MenuItemKind::Submenu(sub) = item {
+            if sub.text()? == "View" {
+                sub.prepend(&reload)?;
+                view_found = true;
+                break;
+            }
+        }
+    }
+    if !view_found {
+        let view = Submenu::with_items(app, "View", true, &[&reload])?;
+        menu.append(&view)?;
+    }
+    app.set_menu(menu)?;
+    Ok(())
+}
+
+#[cfg(desktop)]
+fn reload_main_webview(app: &tauri::AppHandle) {
+    use tauri::Manager;
+    if let Some(window) = app.get_webview_window("main") {
+        let _ = window.reload();
+    }
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -59,9 +99,27 @@ pub fn run() {
 
     let state = AppState { service, agent_url };
 
-    tauri::Builder::default()
-        .manage(state)
-        .invoke_handler(tauri::generate_handler![get_local_agent_endpoint])
+    let mut builder = tauri::Builder::default().manage(state).invoke_handler(
+        tauri::generate_handler![get_local_agent_endpoint],
+    );
+
+    #[cfg(desktop)]
+    {
+        builder = builder
+            .setup(|app| {
+                if let Err(error) = install_desktop_chrome_menu(app.handle()) {
+                    tracing::warn!(error = %error, "desktop chrome menu unavailable");
+                }
+                Ok(())
+            })
+            .on_menu_event(|app, event| {
+                if event.id().as_ref() == MENU_RELOAD_PAGE {
+                    reload_main_webview(app);
+                }
+            });
+    }
+
+    builder
         .run(tauri::generate_context!())
         .expect("error while running Weline GUI");
 }
@@ -81,11 +139,4 @@ fn agent_web_root() -> PathBuf {
         );
     }
     dir
-}
-
-/// Keep Serialize import used when LocalAgentEndpoint is the only IPC payload.
-#[allow(dead_code)]
-fn _assert_endpoint_serialize() {
-    fn assert_serialize<T: Serialize>() {}
-    assert_serialize::<LocalAgentEndpoint>();
 }

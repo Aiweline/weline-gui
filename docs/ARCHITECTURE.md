@@ -1,27 +1,54 @@
 # 架构与数据流
 
+> **硬约束（强制）**：桌面 / Web / 无桌面 agent **必须统一**走 Agent HTTP `/api/v1/*` → `AgentService`。  
+> 禁止业务层 Tauri `invoke`、禁止 Vite/Node 平行扫描或其它第二套业务通道。  
+> 完整条文与自检清单见 **[AGENT_HTTP_UNIFIED.md](AGENT_HTTP_UNIFIED.md)**（改代码前必读）。
+
 ## 运行形态
 
 ```mermaid
 flowchart LR
-    D[Windows / macOS / Linux 桌面] -->|Tauri IPC| S[AgentService]
-    M[iOS / Android] -->|HTTPS + Bearer Token| H[weline-agent]
-    B[无桌面 Linux Web UI] -->|同源 HTTPS/HTTP 回环| H
-    H --> S
+    UI[React_UI]
+    T[AgentTransport]
+    API["/api/v1/*"]
+    S[AgentService]
+    UI --> T --> API
+    D[Desktop_Tauri] -->|embeds_loopback_HTTP| API
+    A[weline-agent] --> API
+    V[Vite_dev_1420] -->|proxy_/api| API
+    API --> S
     S -->|参数数组，不经过 Shell| W[php bin/w]
     S --> P[宿主进程与资源]
-    S --> T[网站 TLS 握手]
+    S --> Cert[网站 TLS 握手]
     S --> G[GitHub Releases API]
     W --> L[WLS Master / Worker / Gateway]
 ```
 
-桌面应用和无桌面代理复用同一个 `AgentService`，因此服务控制、指标、证书与更新判断只有一份实现。区别仅在传输层：桌面走 Tauri IPC，远程客户端走版本化 REST API。
+桌面应用、浏览器开发态与无桌面 `weline-agent` **共用同一套** `AgentService` 与版本化 REST API。前端业务**只**调用 `/api/v1/*`，不再按环境分叉到 Tauri IPC。
+
+| 宿主 | 如何到达 Agent HTTP |
+| --- | --- |
+| 桌面 Tauri | 进程内嵌 `http::serve`（默认 `127.0.0.1:17640`）；可选 `get_local_agent_endpoint` 注入 URL/token |
+| Vite 开发（`:1420`） | `server.proxy['/api']` → 同上 Agent；`GET /api/v1/local-session`（仅 loopback）取 token |
+| 无桌面 Linux / 远程 | `weline-agent serve` 提供同一 API（非回环须 TLS） |
+
+本机模式引导：`GET /api/v1/local-session`（peer 必须为 loopback）返回 `{ agentUrl, token, listen }`，之后所有受保护端点使用 `Authorization: Bearer <token>`。
+
+### 传输边界（勿突破）
+
+| 允许 | 禁止 |
+| --- | --- |
+| `AgentTransport` → `fetch('/api/v1/...')` | 前端业务 `invoke('scan_*' / 'get_snapshot' / …)` |
+| 业务只在 `AgentService` + `http.rs` | Vite/Node 再实现项目扫描或其它业务 |
+| 桌面仅引导 IPC：`get_local_agent_endpoint` | 桌面一套 API、浏览器另一套「修好 Web」的平行层 |
+| `discover.rs` 经 `GET /api/v1/projects/scan` | SPA HTML / 非 JSON 冒充 API 成功响应 |
 
 ## 目录
 
-- `src/`：React 界面、首次安装、多语言与传输适配器。
+- `src/`：React 界面、首次安装、多语言与 **HTTP-only** 传输适配器。
 - `src-tauri/src/service.rs`：WLS 生命周期、快照聚合与受限命令执行。
-- `src-tauri/src/http.rs`：无桌面 Linux Web/API 服务、鉴权、TLS 监听限制。
+- `src-tauri/src/http.rs`：Agent HTTP 面（鉴权、CORS、TLS 限制、静态托管）。
+- `src-tauri/src/discover.rs`：本机项目扫描（桌面与 agent 共用）。
 - `src-tauri/src/tls.rs`：对网站端点进行 TLS 握手并解析 X.509。
 - `src-tauri/src/update.rs`：GitHub 正式 Release 与语义版本判断。
 - `src-tauri/src/bin/weline-agent.rs`：Linux/headless 入口。
@@ -29,10 +56,11 @@ flowchart LR
 
 ## API v1
 
-`GET /api/v1/health` 是唯一无需令牌的端点，只返回健康状态、版本与时间。以下端点均要求 `Authorization: Bearer <token>`：
+`GET /api/v1/health` 与 **loopback-only** `GET /api/v1/local-session` 无需 Bearer。以下端点均要求 `Authorization: Bearer <token>`：
 
 | 方法 | 路径 | 用途 |
 | --- | --- | --- |
+| GET | `/api/v1/local-session` | 回环引导：返回 agentUrl + token（非 loopback → 403） |
 | GET / PUT | `/api/v1/config` | 读取/保存非敏感配置 |
 | GET | `/api/v1/snapshot` | 宿主、进程、WLS、网站与证书快照 |
 | POST | `/api/v1/wls/control` | start/stop/restart/reload/status |
@@ -40,6 +68,9 @@ flowchart LR
 | POST | `/api/v1/certificates/delete` | 删除托管证书；若仍被站点引用且未 `confirm`，返回 `needsConfirmation` |
 | GET | `/api/v1/update` | 检查 GitHub 最新正式 Release |
 | GET | `/api/v1/projects/scan` | 扫描本机 Weline 项目（运行中的优先） |
+| GET | `/api/v1/websites` | 网站列表 |
+| GET | `/api/v1/websites/domain-pool` | 域名池列表 |
+| POST | `/api/v1/open-external` | 本机打开外部 URL（http/https） |
 
 访问令牌不会通过配置 API 返回。服务实例缓存 10 秒、证书探测缓存 60 秒，以避免高频执行框架命令或 TLS 握手。
 

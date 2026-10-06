@@ -146,8 +146,12 @@ fn scan_children(roots: &mut Vec<PathBuf>, dir: &Path, remaining_depth: usize) {
     }
 }
 
+fn is_framework_root(path: &Path) -> bool {
+    path.join("bin/w").is_file() && path.join("app/etc/env.php").is_file()
+}
+
 fn push_if_framework(roots: &mut Vec<PathBuf>, path: PathBuf) {
-    if path.join("bin/w").is_file() {
+    if is_framework_root(&path) {
         roots.push(path);
     }
 }
@@ -155,7 +159,7 @@ fn push_if_framework(roots: &mut Vec<PathBuf>, path: PathBuf) {
 pub fn nearest_framework_root(start: &Path) -> Option<PathBuf> {
     let mut current = start.to_path_buf();
     for _ in 0..MAX_WALK_DEPTH {
-        if current.join("bin/w").is_file() {
+        if is_framework_root(&current) {
             return Some(canonicalize_or_self(current));
         }
         if !current.pop() {
@@ -170,7 +174,7 @@ pub fn inspect_framework_root(
     running: bool,
     php_binary: &str,
 ) -> Option<DiscoveredProject> {
-    if !root.join("bin/w").is_file() {
+    if !is_framework_root(root) {
         return None;
     }
     let root = canonicalize_or_self(root.to_path_buf());
