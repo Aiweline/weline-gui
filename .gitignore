@@ -10,3 +10,5 @@ src-tauri/gen/
 coverage/
 artifacts/
 *.tsbuildinfo
+
+release/

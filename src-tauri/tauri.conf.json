@@ -31,7 +31,6 @@
     "category": "DeveloperTool",
     "shortDescription": "Start, observe and manage Weline WLS",
     "longDescription": "Cross-platform Weline WLS service control, host monitoring, certificate visibility and framework command console.",
-    "createUpdaterArtifacts": true
+    "createUpdaterArtifacts": false
   }
 }
-

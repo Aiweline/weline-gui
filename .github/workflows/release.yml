@@ -4,6 +4,12 @@ on:
   push:
     tags:
       - 'v*'
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Existing tag to rebuild (e.g. v0.1.0)'
+        required: true
+        default: 'v0.1.0'
 
 permissions:
   contents: write
@@ -13,10 +19,18 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        platform: [macos-14, ubuntu-22.04, windows-latest]
+        include:
+          - platform: macos-14
+            args: --bundles dmg,app
+          - platform: ubuntu-22.04
+            args: --bundles deb,appimage
+          - platform: windows-latest
+            args: --bundles nsis,msi
     runs-on: ${{ matrix.platform }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref }}
       - uses: actions/setup-node@v4
         with:
           node-version: 22
@@ -34,9 +48,14 @@ jobs:
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         with:
-          tagName: v__VERSION__
-          releaseName: Weline Control Center v__VERSION__
-          releaseBody: See the assets below to install this version.
-          releaseDraft: true
-          prerelease: false
+          tagName: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || 'v__VERSION__' }}
+          releaseName: Weline Control Center ${{ github.event_name == 'workflow_dispatch' && inputs.tag || 'v__VERSION__' }}
+          releaseBody: |
+            Multi-platform installers (not source ZIP).
 
+            - macOS: `.dmg`
+            - Windows: `.msi` / `.exe` (NSIS)
+            - Linux: `.deb` / `.AppImage`
+          releaseDraft: false
+          prerelease: false
+          args: ${{ matrix.args }}
