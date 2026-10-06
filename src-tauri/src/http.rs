@@ -1,0 +1,243 @@
+use crate::discover;
+use crate::models::{
+    CommandRequest, ControlRequest, CreateWebsiteRequest, DeleteCertificateRequest, HealthResponse,
+    PublicConfig,
+};
+use crate::service::AgentService;
+use anyhow::{Context, Result, bail};
+use axum::body::Body;
+use axum::extract::{Request, State};
+use axum::http::{HeaderValue, Method, StatusCode};
+use axum::middleware::{self, Next};
+use axum::response::{IntoResponse, Response};
+use axum::routing::{get, post};
+use axum::{Json, Router};
+use axum_server::tls_rustls::RustlsConfig;
+use chrono::Utc;
+use serde::Serialize;
+use std::net::SocketAddr;
+use std::path::PathBuf;
+use tower_http::cors::CorsLayer;
+use tower_http::services::{ServeDir, ServeFile};
+use tower_http::trace::TraceLayer;
+
+#[derive(Clone)]
+struct HttpState {
+    service: AgentService,
+    token: String,
+}
+
+#[derive(Debug)]
+struct ApiError(anyhow::Error);
+
+impl IntoResponse for ApiError {
+    fn into_response(self) -> Response {
+        let body = Json(serde_json::json!({
+            "error": self.0.to_string(),
+        }));
+        (StatusCode::BAD_REQUEST, body).into_response()
+    }
+}
+
+impl<E> From<E> for ApiError
+where
+    E: Into<anyhow::Error>,
+{
+    fn from(error: E) -> Self {
+        Self(error.into())
+    }
+}
+
+pub async fn serve(
+    service: AgentService,
+    listen: &str,
+    web_root: PathBuf,
+    tls_certificate: Option<PathBuf>,
+    tls_key: Option<PathBuf>,
+) -> Result<()> {
+    crate::tls::install_crypto_provider();
+    let address: SocketAddr = listen.parse().context("invalid listen address")?;
+    if !address.ip().is_loopback() && (tls_certificate.is_none() || tls_key.is_none()) {
+        bail!("non-loopback agent listeners require both --tls-cert and --tls-key");
+    }
+    let config = service.config().await;
+    let router = build_router(
+        service,
+        config.access_token,
+        config.allowed_origins,
+        web_root,
+    )?;
+
+    match (tls_certificate, tls_key) {
+        (Some(certificate), Some(key)) => {
+            let tls = RustlsConfig::from_pem_file(certificate, key).await?;
+            axum_server::bind_rustls(address, tls)
+                .serve(router.into_make_service())
+                .await?;
+        }
+        (None, None) => {
+            let listener = tokio::net::TcpListener::bind(address).await?;
+            axum::serve(listener, router).await?;
+        }
+        _ => bail!("TLS certificate and key must be configured together"),
+    }
+    Ok(())
+}
+
+fn build_router(
+    service: AgentService,
+    token: String,
+    allowed_origins: Vec<String>,
+    web_root: PathBuf,
+) -> Result<Router> {
+    let state = HttpState { service, token };
+    let protected = Router::new()
+        .route("/api/v1/config", get(get_config).put(put_config))
+        .route("/api/v1/snapshot", get(snapshot))
+        .route("/api/v1/wls/control", post(control))
+        .route("/api/v1/websites", get(list_websites).post(create_website))
+        .route("/api/v1/certificates/delete", post(delete_certificate))
+        .route("/api/v1/console", post(console))
+        .route("/api/v1/update", get(check_update))
+        .route("/api/v1/projects/scan", get(scan_projects))
+        .route_layer(middleware::from_fn_with_state(state.clone(), authorize));
+
+    let mut cors = CorsLayer::new()
+        .allow_methods([Method::GET, Method::POST, Method::PUT, Method::DELETE])
+        .allow_headers([
+            axum::http::header::AUTHORIZATION,
+            axum::http::header::CONTENT_TYPE,
+        ]);
+    let origins = allowed_origins
+        .iter()
+        .filter_map(|origin| HeaderValue::from_str(origin).ok())
+        .collect::<Vec<_>>();
+    if !origins.is_empty() {
+        cors = cors.allow_origin(origins);
+    }
+
+    let index = web_root.join("index.html");
+    let static_files = ServeDir::new(web_root).fallback(ServeFile::new(index));
+    Ok(Router::new()
+        .route("/api/v1/health", get(health))
+        .merge(protected)
+        .fallback_service(static_files)
+        .layer(cors)
+        .layer(TraceLayer::new_for_http())
+        .with_state(state))
+}
+
+async fn authorize(State(state): State<HttpState>, request: Request<Body>, next: Next) -> Response {
+    let authorized = request
+        .headers()
+        .get(axum::http::header::AUTHORIZATION)
+        .and_then(|header| header.to_str().ok())
+        .and_then(|header| header.strip_prefix("Bearer "))
+        .is_some_and(|candidate| constant_time_equal(candidate.as_bytes(), state.token.as_bytes()));
+    if !authorized {
+        return (
+            StatusCode::UNAUTHORIZED,
+            Json(serde_json::json!({"error": "missing or invalid bearer token"})),
+        )
+            .into_response();
+    }
+    next.run(request).await
+}
+
+async fn health(State(state): State<HttpState>) -> Json<HealthResponse> {
+    let config = state.service.public_config().await;
+    Json(HealthResponse {
+        status: "ok".to_string(),
+        version: env!("CARGO_PKG_VERSION").to_string(),
+        configured: config.configured,
+        timestamp: Utc::now().to_rfc3339(),
+    })
+}
+
+async fn get_config(State(state): State<HttpState>) -> Json<PublicConfig> {
+    Json(state.service.public_config().await)
+}
+
+async fn put_config(
+    State(state): State<HttpState>,
+    Json(config): Json<PublicConfig>,
+) -> Result<Json<PublicConfig>, ApiError> {
+    Ok(Json(state.service.update_config(config).await?))
+}
+
+async fn snapshot(State(state): State<HttpState>) -> Result<Json<impl Serialize>, ApiError> {
+    Ok(Json(state.service.snapshot().await?))
+}
+
+async fn control(
+    State(state): State<HttpState>,
+    Json(request): Json<ControlRequest>,
+) -> Result<Json<impl Serialize>, ApiError> {
+    Ok(Json(
+        state
+            .service
+            .control(&request.action, request.instance.as_deref())
+            .await?,
+    ))
+}
+
+async fn list_websites(State(state): State<HttpState>) -> Result<Json<impl Serialize>, ApiError> {
+    Ok(Json(state.service.list_websites().await?))
+}
+
+async fn create_website(
+    State(state): State<HttpState>,
+    Json(request): Json<CreateWebsiteRequest>,
+) -> Result<Json<impl Serialize>, ApiError> {
+    Ok(Json(state.service.create_website(request).await?))
+}
+
+async fn delete_certificate(
+    State(state): State<HttpState>,
+    Json(request): Json<DeleteCertificateRequest>,
+) -> Result<Json<impl Serialize>, ApiError> {
+    Ok(Json(state.service.delete_certificate(request).await?))
+}
+
+async fn console(
+    State(state): State<HttpState>,
+    Json(request): Json<CommandRequest>,
+) -> Result<Json<impl Serialize>, ApiError> {
+    Ok(Json(state.service.execute_console(&request.command).await?))
+}
+
+async fn check_update(State(state): State<HttpState>) -> Result<Json<impl Serialize>, ApiError> {
+    Ok(Json(state.service.check_update().await?))
+}
+
+async fn scan_projects() -> Result<Json<impl Serialize>, ApiError> {
+    Ok(Json(
+        tokio::task::spawn_blocking(discover::scan_local_projects)
+            .await
+            .context("project scan task failed")?,
+    ))
+}
+
+fn constant_time_equal(left: &[u8], right: &[u8]) -> bool {
+    if left.len() != right.len() {
+        return false;
+    }
+    left.iter()
+        .zip(right.iter())
+        .fold(0_u8, |difference, (left, right)| {
+            difference | (left ^ right)
+        })
+        == 0
+}
+
+#[cfg(test)]
+mod tests {
+    use super::constant_time_equal;
+
+    #[test]
+    fn token_comparison_requires_exact_bytes() {
+        assert!(constant_time_equal(b"token", b"token"));
+        assert!(!constant_time_equal(b"token", b"Token"));
+        assert!(!constant_time_equal(b"token", b"token-long"));
+    }
+}

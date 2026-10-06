@@ -1,0 +1,17 @@
+[Unit]
+Description=Weline GUI headless control agent
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+EnvironmentFile=-%h/.config/weline-gui/agent.env
+ExecStart=%h/.local/bin/weline-agent serve --framework-root ${WELINE_FRAMEWORK_ROOT} --php-binary ${WELINE_PHP_BINARY} --web-root %h/.local/share/weline-gui/dist
+Restart=on-failure
+RestartSec=3
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
+
+[Install]
+WantedBy=default.target

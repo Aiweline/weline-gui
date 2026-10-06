@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" role="img" aria-label="Weline">
+  <defs>
+    <linearGradient id="background" x1="120" y1="80" x2="900" y2="940" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#132A29"/>
+      <stop offset="1" stop-color="#071110"/>
+    </linearGradient>
+    <linearGradient id="mark" x1="224" y1="280" x2="808" y2="760" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#E9FF7A"/>
+      <stop offset="1" stop-color="#72E6B1"/>
+    </linearGradient>
+  </defs>
+  <rect width="1024" height="1024" rx="230" fill="url(#background)"/>
+  <path d="M192 300h132l92 376 96-284h98l96 284 92-376h132L780 746c-14 42-43 64-86 64h-60L561 600l-73 210h-60c-43 0-72-22-86-64L192 300Z" fill="url(#mark)"/>
+  <circle cx="512" cy="248" r="46" fill="#F6FFCB"/>
+</svg>
