@@ -8,10 +8,12 @@ Weline Control Center 是 Weline/WLS 的独立跨平台控制中心。它与框�
 
 请下载**平台安装包**，不要用源码 ZIP：
 
-- [Gitee Releases](https://gitee.com/aiweline/weline-gui/releases)
-- [GitHub Releases](https://github.com/Aiweline/weline-gui/releases)
-- [macOS DMG（Apple Silicon）](https://gitee.com/aiweline/weline-gui/releases/download/v0.1.0/Weline-Control-Center-0.1.0-macos-aarch64.dmg)
-- Windows `.msi` / Linux `.deb` / `.AppImage`：见上述 Releases（多端流水线产出）
+- [Gitee 多端安装包](https://gitee.com/aiweline/weline-gui/releases/tag/v0.1.0-packages)
+- [GitHub 多端安装包](https://github.com/Aiweline/weline-gui/releases/tag/v0.1.0-packages)
+- [macOS DMG（Apple Silicon）](https://gitee.com/aiweline/weline-gui/releases/download/v0.1.0-packages/Weline-Control-Center-0.1.0-macos-aarch64.dmg)
+- [Windows setup.exe（x64）](https://gitee.com/aiweline/weline-gui/releases/download/v0.1.0-packages/Weline-Control-Center-0.1.0-windows-x64-setup.exe)
+- [Linux DEB（amd64）](https://gitee.com/aiweline/weline-gui/releases/download/v0.1.0-packages/Weline-Control-Center-0.1.0-linux-amd64.deb)
+- [Linux AppImage（amd64）](https://gitee.com/aiweline/weline-gui/releases/download/v0.1.0-packages/Weline-Control-Center-0.1.0-linux-amd64.AppImage)
 
 
 ## 可行性结论
