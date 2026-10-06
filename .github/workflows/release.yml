@@ -23,9 +23,10 @@ jobs:
           - platform: macos-14
             args: --bundles dmg,app
           - platform: ubuntu-22.04
+            # AppImage needs a square PNG; prefer deb+appimage after icons are present
             args: --bundles deb,appimage
           - platform: windows-latest
-            args: --bundles nsis,msi
+            args: --bundles nsis
     runs-on: ${{ matrix.platform }}
     steps:
       - uses: actions/checkout@v4
