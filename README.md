@@ -4,6 +4,16 @@ Weline Control Center 是 Weline/WLS 的独立跨平台控制中心。它与框�
 
 当前版本：`0.1.0`（可运行 MVP）。
 
+## 安装包下载
+
+请下载**平台安装包**，不要用源码 ZIP：
+
+- [Gitee Releases](https://gitee.com/aiweline/weline-gui/releases)
+- [GitHub Releases](https://github.com/Aiweline/weline-gui/releases)
+- [macOS DMG（Apple Silicon）](https://gitee.com/aiweline/weline-gui/releases/download/v0.1.0/Weline-Control-Center-0.1.0-macos-aarch64.dmg)
+- Windows `.msi` / Linux `.deb` / `.AppImage`：见上述 Releases（多端流水线产出）
+
+
 ## 可行性结论
 
 | 平台 | 使用方式 | 本机启动 WLS | 状态 |
