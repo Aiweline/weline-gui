@@ -1,5 +1,7 @@
 name: Release desktop apps
 
+# 正式多端发布唯一入口：push v* 标签（或 workflow_dispatch 重建）。
+# 禁止智能体/人工本机逐平台打包再手工上传。
 on:
   push:
     tags:
@@ -7,7 +9,7 @@ on:
   workflow_dispatch:
     inputs:
       tag:
-        description: 'Existing tag to rebuild (e.g. v0.1.0)'
+        description: 'Existing tag to rebuild (e.g. v0.2.0)'
         required: true
         default: 'v0.1.0'
 
@@ -23,7 +25,6 @@ jobs:
           - platform: macos-14
             args: --bundles dmg,app
           - platform: ubuntu-22.04
-            # AppImage needs a square PNG; prefer deb+appimage after icons are present
             args: --bundles deb,appimage
           - platform: windows-latest
             args: --bundles nsis
@@ -52,11 +53,91 @@ jobs:
           tagName: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || 'v__VERSION__' }}
           releaseName: Weline Control Center ${{ github.event_name == 'workflow_dispatch' && inputs.tag || 'v__VERSION__' }}
           releaseBody: |
-            Multi-platform installers (not source ZIP).
+            ## 多端安装包（流水线一次性产出）
 
-            - macOS: `.dmg`
-            - Windows: `.msi` / `.exe` (NSIS)
-            - Linux: `.deb` / `.AppImage`
+            请按系统下载，不要用源码 ZIP。
+
+            | 平台 | 文件 |
+            | --- | --- |
+            | macOS | `.dmg` |
+            | Windows | `.exe` Setup (NSIS) |
+            | Linux | `.deb` / `.AppImage` |
+
+            由 `.github/workflows/release.yml` 矩阵构建；勿本机逐平台手工打包。
           releaseDraft: false
           prerelease: false
           args: ${{ matrix.args }}
+
+  sync-gitee:
+    needs: publish
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Resolve tag
+        id: tag
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "name=${{ inputs.tag }}" >> "$GITHUB_OUTPUT"
+          else
+            echo "name=${GITHUB_REF_NAME}" >> "$GITHUB_OUTPUT"
+          fi
+      - name: Skip if no Gitee token
+        id: gate
+        env:
+          GITEE_ACCESS_TOKEN: ${{ secrets.GITEE_ACCESS_TOKEN }}
+        run: |
+          if [ -z "${GITEE_ACCESS_TOKEN}" ]; then
+            echo "enabled=false" >> "$GITHUB_OUTPUT"
+            echo "GITEE_ACCESS_TOKEN not set — skip Gitee mirror (GitHub Release still published)."
+          else
+            echo "enabled=true" >> "$GITHUB_OUTPUT"
+          fi
+      - name: Download GitHub release assets
+        if: steps.gate.outputs.enabled == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          mkdir -p assets
+          gh release download "${{ steps.tag.outputs.name }}" \
+            --repo "${{ github.repository }}" \
+            --dir assets \
+            --pattern '*'
+          ls -lah assets
+      - name: Mirror assets to Gitee Release
+        if: steps.gate.outputs.enabled == 'true'
+        env:
+          GITEE_ACCESS_TOKEN: ${{ secrets.GITEE_ACCESS_TOKEN }}
+          TAG: ${{ steps.tag.outputs.name }}
+          OWNER: aiweline
+          REPO: weline-gui
+        run: |
+          set -euo pipefail
+          BODY='## 多端安装包（GitHub Actions 流水线同步）
+
+          请按系统下载安装包，不要用源码 ZIP。
+          '
+          RESP=$(curl -sS "https://gitee.com/api/v5/repos/${OWNER}/${REPO}/releases/tags/${TAG}?access_token=${GITEE_ACCESS_TOKEN}" || true)
+          RID=$(printf '%s' "${RESP}" | python3 -c 'import json,sys
+          try:
+            d=json.load(sys.stdin)
+          except Exception:
+            d=None
+          print(d.get("id") if isinstance(d,dict) and d.get("id") else "")')
+          if [ -z "${RID}" ]; then
+            RID=$(curl -sS -X POST "https://gitee.com/api/v5/repos/${OWNER}/${REPO}/releases" \
+              --data-urlencode "access_token=${GITEE_ACCESS_TOKEN}" \
+              --data-urlencode "tag_name=${TAG}" \
+              --data-urlencode "name=Weline Control Center ${TAG}" \
+              --data-urlencode "body=${BODY}" \
+              --data-urlencode "target_commitish=main" | python3 -c 'import sys,json; print(json.load(sys.stdin)["id"])')
+          fi
+          echo "gitee_release_id=${RID}"
+          for f in assets/*; do
+            [ -f "$f" ] || continue
+            case "$(basename "$f")" in
+              *.zip|*.tar.gz) continue ;;
+            esac
+            echo "upload $(basename "$f")"
+            curl -sS -X POST \
+              "https://gitee.com/api/v5/repos/${OWNER}/${REPO}/releases/${RID}/attach_files?access_token=${GITEE_ACCESS_TOKEN}" \
+              -F "file=@${f}" | python3 -c 'import sys,json; d=json.load(sys.stdin); print(d.get("name") or d.get("message") or d)'
+          done
