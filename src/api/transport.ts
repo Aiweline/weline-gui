@@ -1,6 +1,7 @@
 import type {
   ClientConnection,
   CommandResult,
+  ConsoleCommandCatalog,
   CreateWebsiteRequest,
   DashboardSnapshot,
   DeleteCertificateRequest,
@@ -25,17 +26,25 @@ export interface LocalAgentEndpoint {
   listen: string;
 }
 
+export function isLoopbackHost(hostname = typeof window !== 'undefined' ? window.location.hostname : ''): boolean {
+  const host = String(hostname || '').trim().toLowerCase();
+  return host === '127.0.0.1' || host === 'localhost' || host === '::1' || host === '[::1]';
+}
+
 export function loadConnection(): ClientConnection {
-  const mobilePlatform = /Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
+  const userAgent = typeof navigator !== 'undefined' ? navigator.userAgent : '';
+  const mobilePlatform = /Android|iPhone|iPad|iPod/i.test(userAgent);
+  // Loopback browser (agent-served dist / Vite) uses the same local Agent HTTP as desktop.
+  // Only non-loopback browsers default to remote (need explicit URL + token).
+  const preferLocal = (isTauri() && !mobilePlatform) || (!mobilePlatform && isLoopbackHost());
   const fallback: ClientConnection = {
-    // Mobile sandboxes cannot host PHP/WLS. Desktop and browser local mode both
-    // talk to the same loopback Agent HTTP (/api/v1/*).
-    mode: isTauri() && !mobilePlatform ? 'local' : 'remote',
+    mode: preferLocal ? 'local' : 'remote',
     agentUrl: DEFAULT_LOCAL_AGENT_URL,
     token: '',
     setupComplete: false,
   };
   try {
+    if (typeof localStorage === 'undefined') return fallback;
     const saved = localStorage.getItem(CONNECTION_KEY);
     return saved ? { ...fallback, ...JSON.parse(saved) } : fallback;
   } catch {
@@ -43,12 +52,67 @@ export function loadConnection(): ClientConnection {
   }
 }
 
+export type LocalBootstrapStatus = 'resumed' | 'needs_setup' | 'offline';
+
+export type LocalBootstrapResult =
+  | { status: 'resumed'; connection: ClientConnection; config: PublicConfig }
+  | { status: 'needs_setup' }
+  | { status: 'offline'; reason?: string };
+
+/**
+ * Loopback authority is agent `config.configured` + frameworkRoot.
+ * localStorage.setupComplete is only a cache after a successful resume.
+ * Distinguishes offline (agent unreachable) from needs_setup (reachable but not configured).
+ */
+export async function resolveLocalBootstrap(
+  seed: ClientConnection = loadConnection(),
+): Promise<LocalBootstrapResult> {
+  // Caller (App) skips bootstrap when setupComplete is already true.
+  if (seed.mode === 'remote' && !isLoopbackHost()) {
+    return { status: 'needs_setup' };
+  }
+  let endpoint: LocalAgentEndpoint;
+  try {
+    endpoint = await resolveLocalAgentEndpoint(seed.agentUrl || DEFAULT_LOCAL_AGENT_URL);
+  } catch (reason) {
+    return { status: 'offline', reason: reason instanceof Error ? reason.message : String(reason || '') };
+  }
+  try {
+    const connection: ClientConnection = {
+      ...seed,
+      mode: 'local',
+      agentUrl: endpoint.agentUrl,
+      token: endpoint.token,
+      setupComplete: false,
+    };
+    const transport = new AgentTransport(connection);
+    const config = await transport.config();
+    if (!config.configured || !String(config.frameworkRoot || '').trim()) {
+      return { status: 'needs_setup' };
+    }
+    const finalized: ClientConnection = { ...connection, setupComplete: true };
+    saveConnection(finalized);
+    return { status: 'resumed', connection: finalized, config };
+  } catch (reason) {
+    return { status: 'offline', reason: reason instanceof Error ? reason.message : String(reason || '') };
+  }
+}
+
+/** @deprecated Use resolveLocalBootstrap; kept for transitional imports. */
+export async function tryResumeConfiguredLocalSession(
+  seed: ClientConnection = loadConnection(),
+): Promise<{ connection: ClientConnection; config: PublicConfig } | null> {
+  const result = await resolveLocalBootstrap(seed);
+  if (result.status !== 'resumed') return null;
+  return { connection: result.connection, config: result.config };
+}
+
 export function saveConnection(connection: ClientConnection): void {
   localStorage.setItem(CONNECTION_KEY, JSON.stringify(connection));
 }
 
 export function isTauri(): boolean {
-  return '__TAURI_INTERNALS__' in window;
+  return typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window;
 }
 
 /**
@@ -160,6 +224,10 @@ export class AgentTransport {
       method: 'POST',
       body: JSON.stringify({ command }),
     });
+  }
+
+  async listConsoleCommands(): Promise<ConsoleCommandCatalog> {
+    return this.request('/api/v1/console/commands');
   }
 
   async update(): Promise<UpdateInfo> {

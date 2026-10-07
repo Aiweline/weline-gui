@@ -15,6 +15,21 @@
 - [ ] Vite `:1420` 同源 `/api/v1/...` 与桌面内嵌 Agent 行为一致（代理到同一 `AgentService`）。
 - [ ] 前端无业务 `invoke`；仅允许引导级 `get_local_agent_endpoint`（若存在）。
 - [ ] 仓库无复活的 Node「本机扫描」平行实现（如已删除的 `local-project-scan.mjs` / Vite scan plugin）。
+- [ ] 回环 Web：agent 已 `configured` 时清空 `localStorage` 后刷新，直进总览（不走 SetupWizard）。
+- [ ] 回环 Web：agent 不可达时显示 OfflineGate，而不是「选择宿主」向导。
+- [ ] 网站 → 新建网站：主地址可搜索过滤域名池并点选创建。
+- [x] 命令控制台：`GET /api/v1/console/commands` 返回分组树（本机 333/112）；左侧可搜索/展开；单击填入、双击执行；仍拒绝 Shell 运算符（2026-10-07 Web）。
+
+## 多机运维中枢（2026-10-06 Web 真机）
+
+验收 Host：`http://127.0.0.1:1420/`（Vite → Agent `127.0.0.1:17640`；桌面嵌入同一 Web）。
+
+- [x] 顶栏 Host Profile 切换器；设置可「添加远程主机」（Local + 远程 2）。
+- [x] 多机总览：本机卡片显示 CPU/内存/在线实例（真机拉 `/api/v1/snapshot`）。
+- [x] SSH 终端页：密钥表单 + session-only 提示；连接按钮在缺字段时禁用。
+- [x] `WS /api/v1/ssh/session`：坏 token → HTTP 401；有效 token 可升级 WebSocket。
+- [x] Framework API SDK 设置区：站点根 / 用户 / 密码 / 登录路径（默认 `/api/api/rest/v1/auth/login`）。
+- [x] Vitest 28 passed；`cargo check --bin weline-agent` 通过。
 
 ## 自动化验证
 

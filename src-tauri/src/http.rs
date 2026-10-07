@@ -4,9 +4,12 @@ use crate::models::{
     LocalAgentEndpoint, OpenExternalRequest, PublicConfig,
 };
 use crate::service::AgentService;
+use crate::shell_bridge;
+use crate::ssh_bridge;
 use anyhow::{Context, Result, bail};
 use axum::body::Body;
-use axum::extract::{ConnectInfo, Request, State};
+use axum::extract::ws::WebSocketUpgrade;
+use axum::extract::{ConnectInfo, Query, Request, State};
 use axum::http::{HeaderValue, Method, StatusCode};
 use axum::middleware::{self, Next};
 use axum::response::{IntoResponse, Response};
@@ -14,7 +17,7 @@ use axum::routing::{get, post};
 use axum::{Json, Router};
 use axum_server::tls_rustls::RustlsConfig;
 use chrono::Utc;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use std::net::SocketAddr;
 use std::path::PathBuf;
 use tower_http::cors::CorsLayer;
@@ -27,6 +30,12 @@ struct HttpState {
     token: String,
     agent_url: String,
     listen: String,
+    known_hosts_dir: PathBuf,
+}
+
+#[derive(Debug, Deserialize)]
+struct TokenQuery {
+    token: Option<String>,
 }
 
 #[derive(Debug)]
@@ -105,11 +114,15 @@ fn build_router(
     agent_url: String,
     listen: String,
 ) -> Result<Router> {
+    let known_hosts_dir = directories::ProjectDirs::from("com", "Weline", "WelineGUI")
+        .map(|dirs| dirs.data_dir().join("ssh"))
+        .unwrap_or_else(|| PathBuf::from(".").join("weline-agent-ssh"));
     let state = HttpState {
         service,
         token,
         agent_url,
         listen,
+        known_hosts_dir,
     };
     let protected = Router::new()
         .route("/api/v1/config", get(get_config).put(put_config))
@@ -119,6 +132,7 @@ fn build_router(
         .route("/api/v1/websites/domain-pool", get(list_domain_pool))
         .route("/api/v1/certificates/delete", post(delete_certificate))
         .route("/api/v1/console", post(console))
+        .route("/api/v1/console/commands", get(list_console_commands))
         .route("/api/v1/update", get(check_update))
         .route("/api/v1/projects/scan", get(scan_projects))
         .route("/api/v1/open-external", post(open_external))
@@ -143,6 +157,9 @@ fn build_router(
     Ok(Router::new()
         .route("/api/v1/health", get(health))
         .route("/api/v1/local-session", get(local_session))
+        // Browser WebSocket cannot set Authorization; token is query-validated here.
+        .route("/api/v1/ssh/session", get(ssh_session))
+        .route("/api/v1/shell/session", get(shell_session))
         .merge(protected)
         .fallback_service(static_files)
         .layer(cors)
@@ -248,6 +265,12 @@ async fn console(
     Ok(Json(state.service.execute_console(&request.command).await?))
 }
 
+async fn list_console_commands(
+    State(state): State<HttpState>,
+) -> Result<Json<impl Serialize>, ApiError> {
+    Ok(Json(state.service.list_console_commands().await?))
+}
+
 async fn check_update(State(state): State<HttpState>) -> Result<Json<impl Serialize>, ApiError> {
     Ok(Json(state.service.check_update().await?))
 }
@@ -266,6 +289,45 @@ async fn open_external(Json(request): Json<OpenExternalRequest>) -> Result<Json<
         .await
         .context("open external task failed")??;
     Ok(Json(serde_json::json!({ "ok": true })))
+}
+
+async fn ssh_session(
+    State(state): State<HttpState>,
+    Query(query): Query<TokenQuery>,
+    ws: WebSocketUpgrade,
+) -> Response {
+    let provided = query.token.unwrap_or_default();
+    if !constant_time_equal(provided.as_bytes(), state.token.as_bytes()) {
+        return (
+            StatusCode::UNAUTHORIZED,
+            Json(serde_json::json!({"error": "missing or invalid bearer token"})),
+        )
+            .into_response();
+    }
+    let known_hosts_dir = state.known_hosts_dir.clone();
+    ws.on_upgrade(move |socket| ssh_bridge::handle_ssh_socket(socket, known_hosts_dir))
+}
+
+async fn shell_session(
+    State(state): State<HttpState>,
+    Query(query): Query<TokenQuery>,
+    ws: WebSocketUpgrade,
+) -> Response {
+    let provided = query.token.unwrap_or_default();
+    if !constant_time_equal(provided.as_bytes(), state.token.as_bytes()) {
+        return (
+            StatusCode::UNAUTHORIZED,
+            Json(serde_json::json!({"error": "missing or invalid bearer token"})),
+        )
+            .into_response();
+    }
+    let config = state.service.config().await;
+    let default_cwd = if config.framework_root.as_os_str().is_empty() {
+        std::env::current_dir().unwrap_or_else(|_| PathBuf::from("/"))
+    } else {
+        config.framework_root
+    };
+    ws.on_upgrade(move |socket| shell_bridge::handle_shell_socket(socket, default_cwd))
 }
 
 fn constant_time_equal(left: &[u8], right: &[u8]) -> bool {

@@ -1,11 +1,55 @@
 export type Direction = 'ltr' | 'rtl';
-export type ViewId = 'dashboard' | 'instances' | 'websites' | 'sites' | 'console' | 'panel' | 'updates' | 'settings';
+export type ViewId =
+  | 'dashboard'
+  | 'fleet'
+  | 'instances'
+  | 'websites'
+  | 'sites'
+  | 'console'
+  | 'terminal'
+  | 'panel'
+  | 'updates'
+  | 'settings';
 
 export interface ClientConnection {
   mode: 'local' | 'remote';
   agentUrl: string;
   token: string;
   setupComplete: boolean;
+}
+
+export type SshKeyStorage = 'os_keychain' | 'encrypted_vault' | 'session_only';
+
+export interface SshPrivateKeyRef {
+  storage: SshKeyStorage;
+  keyId: string;
+  publicKeyComment?: string;
+  fingerprintSha256?: string;
+}
+
+/** Operator machine profile: agent + optional Framework API + SSH key ref (never PEM). */
+export interface HostProfile {
+  id: string;
+  name: string;
+  kind: 'local' | 'remote';
+  agentUrl: string;
+  agentToken: string;
+  siteBaseUrl?: string;
+  apiUsername?: string;
+  apiLoginPath?: string;
+  sshHost?: string;
+  sshPort?: number;
+  sshUser?: string;
+  sshPrivateKeyRef?: SshPrivateKeyRef;
+  hostKeyFingerprint?: string;
+  setupComplete?: boolean;
+}
+
+export interface FrameworkAuthTokens {
+  accessToken: string;
+  refreshToken: string;
+  expireTime?: number;
+  username?: string;
 }
 
 export interface PublicConfig {
@@ -184,6 +228,25 @@ export interface CommandResult {
   stderr: string;
   durationMs: number;
   timedOut: boolean;
+}
+
+export interface ConsoleCommandItem {
+  name: string;
+  tip: string;
+  module: string;
+  group: string;
+}
+
+export interface ConsoleCommandGroup {
+  id: string;
+  label: string;
+  commands: ConsoleCommandItem[];
+}
+
+export interface ConsoleCommandCatalog {
+  groups: ConsoleCommandGroup[];
+  commands: ConsoleCommandItem[];
+  count: number;
 }
 
 export interface UpdateInfo {

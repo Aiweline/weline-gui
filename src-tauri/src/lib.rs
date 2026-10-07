@@ -1,9 +1,12 @@
+pub mod command_catalog;
 pub mod command_policy;
 pub mod config;
 pub mod discover;
 pub mod http;
 pub mod models;
 pub mod service;
+pub mod shell_bridge;
+pub mod ssh_bridge;
 pub mod tls;
 pub mod update;
 

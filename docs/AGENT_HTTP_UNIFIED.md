@@ -11,7 +11,7 @@
 
 | 层 | 允许 |
 | --- | --- |
-| 前端 | `AgentTransport` 只 `fetch` `/api/v1/...`（含 Vite 代理同源 `/api`） |
+| 前端 | `AgentTransport` 只 `fetch` `/api/v1/...`（含 Vite 代理同源 `/api`；命令树为 `GET /api/v1/console/commands`） |
 | 业务实现 | 仅 `src-tauri` 的 `AgentService` + `http.rs`（桌面内嵌与 `weline-agent serve` 共用） |
 | 本机扫描 | 仅 `discover.rs`，经 `GET /api/v1/projects/scan` 暴露 |
 | 桌面 IPC | **仅**引导：`get_local_agent_endpoint`（或等价）注入 `agentUrl` + `token` |

@@ -27,7 +27,14 @@ describe('locale catalog', () => {
   it('points website creation at the domain pool in Chinese', () => {
     expect(localeCatalog['zh-CN'].messages.websites.poolPlaceholder).toContain('域名池');
     expect(localeCatalog['zh-CN'].messages.websites.openBackend).toContain('后台');
+    expect(localeCatalog['zh-CN'].messages.websites.poolSearch).toContain('搜索');
     expect(localeCatalog.en.messages.websites.poolHint).toContain('backend');
+  });
+
+  it('explains offline agent gate without implying a fresh setup', () => {
+    expect(localeCatalog.en.messages.offline.heading).toContain('agent');
+    expect(localeCatalog['zh-CN'].messages.offline.body).toContain('不需要重新');
+    expect(localeCatalog['zh-CN'].messages.offline.orDesktop).toContain('桌面');
   });
 
   it('marks the public gateway owner in Chinese instance copy', () => {

@@ -26,6 +26,14 @@
 
 不要在公网使用明文 HTTP。CORS 仅允许配置的来源，同源 Web UI不需要额外放宽。
 
+## SSH 终端桥
+
+- 浏览器 WebSocket **不能**带 `Authorization` 头，故使用 `WS /api/v1/ssh/session?token=<agent bearer>`；token 仍做恒定时间比较。
+- 仅允许公钥/私钥；Agent 拒绝把 SSH 密码当主认证。
+- 私钥 PEM 只出现在已鉴权会话的首帧 JSON；写入临时 `0600` 文件供 OpenSSH `-i`，会话结束删除；**不**写入 agent `config.json`。
+- known_hosts 放在平台数据目录 `…/WelineGUI/ssh/known_hosts`；未预置指纹时用 `accept-new`（TOFU），预置则 `StrictHostKeyChecking=yes`。
+- 操作者私钥所有权：只在**操作者本机**（钥匙串 / 会话 / 加密库）；Profile 只存 `keyId` 引用。
+
 ## 内嵌管理面板
 
 iframe 使用 sandbox 权限，并保留“独立窗口打开”降级入口。若管理站点通过 `X-Frame-Options` 或 CSP `frame-ancestors` 禁止嵌入，客户端不会绕过该策略。登录、Cookie 与站点权限仍由管理面板自身负责。

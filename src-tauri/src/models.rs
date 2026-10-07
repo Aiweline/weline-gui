@@ -255,6 +255,31 @@ pub struct CommandResult {
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
+pub struct ConsoleCommandItem {
+    pub name: String,
+    pub tip: String,
+    pub module: String,
+    pub group: String,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ConsoleCommandGroup {
+    pub id: String,
+    pub label: String,
+    pub commands: Vec<ConsoleCommandItem>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ConsoleCommandCatalog {
+    pub groups: Vec<ConsoleCommandGroup>,
+    pub commands: Vec<ConsoleCommandItem>,
+    pub count: usize,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct ControlRequest {
     pub action: String,
     pub instance: Option<String>,

@@ -1,7 +1,24 @@
-import { FormEvent, ReactNode, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { FormEvent, KeyboardEvent as ReactKeyboardEvent, ReactNode, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { AgentTransport, loadConnection, saveConnection } from './api/transport';
+import { filterDomainPool } from './api/domainPool';
+import {
+  connectionFromProfile,
+  createBlankRemoteHost,
+  getActiveHost,
+  getActiveHostId,
+  loadHosts,
+  projectNameFromRoot,
+  removeHost,
+  setActiveHostId as persistActiveHostId,
+  upsertHost,
+} from './api/hosts';
+import { FrameworkApiSdk, clearFrameworkTokens, loadFrameworkTokens } from './api/frameworkSdk';
+import { AgentTransport, loadConnection, resolveLocalBootstrap, saveConnection } from './api/transport';
 import { backendDomainPoolUrl } from './api/projects';
+import { ConsoleView } from './components/ConsoleView';
+import { FleetOverview } from './components/FleetOverview';
+import { HostSwitcher } from './components/HostSwitcher';
+import { TerminalView } from './components/TerminalView';
 import { applyLocale } from './i18n';
 import { localeCatalog, normalizeLocale } from './i18n/catalog';
 import type {
@@ -11,6 +28,7 @@ import type {
   DeleteCertificateResult,
   DiscoveredProject,
   DomainPoolRecord,
+  HostProfile,
   PublicConfig,
   SiteStatus,
   UpdateInfo,
@@ -33,10 +51,12 @@ const emptyConfig: PublicConfig = {
 
 const navigation: Array<{ id: ViewId; icon: string }> = [
   { id: 'dashboard', icon: '◫' },
+  { id: 'fleet', icon: '⧉' },
   { id: 'instances', icon: '⌁' },
   { id: 'websites', icon: '⬡' },
   { id: 'sites', icon: '◎' },
   { id: 'console', icon: '>_' },
+  { id: 'terminal', icon: '▣_' },
   { id: 'panel', icon: '▣' },
   { id: 'updates', icon: '↑' },
   { id: 'settings', icon: '⚙' },
@@ -44,7 +64,13 @@ const navigation: Array<{ id: ViewId; icon: string }> = [
 
 export default function App() {
   const { t, i18n } = useTranslation();
-  const [connection, setConnection] = useState<ClientConnection>(() => loadConnection());
+  const [hosts, setHosts] = useState<HostProfile[]>(() => loadHosts());
+  const [activeHostId, setActiveHostId] = useState(() => getActiveHost().id);
+  const activeHost = useMemo(
+    () => hosts.find((host) => host.id === activeHostId) || hosts[0] || getActiveHost(),
+    [activeHostId, hosts],
+  );
+  const [connection, setConnection] = useState<ClientConnection>(() => connectionFromProfile(getActiveHost()));
   const [config, setConfig] = useState<PublicConfig>(emptyConfig);
   const [snapshot, setSnapshot] = useState<DashboardSnapshot | null>(null);
   const [view, setView] = useState<ViewId>('dashboard');
@@ -54,15 +80,87 @@ export default function App() {
   const [consoleResult, setConsoleResult] = useState<CommandResult | null>(null);
   const [updateInfo, setUpdateInfo] = useState<UpdateInfo | null>(null);
   const [history, setHistory] = useState<Array<{ cpu: number; memory: number }>>([]);
+  const [bootstrapPhase, setBootstrapPhase] = useState<'idle' | 'loading' | 'offline' | 'ready'>(() => (
+    connectionFromProfile(getActiveHost()).setupComplete ? 'ready' : 'loading'
+  ));
 
   const transport = useMemo(() => new AgentTransport(connection), [connection]);
+
+  const applyHost = useCallback((profile: HostProfile, nextConnection?: ClientConnection, frameworkRoot?: string) => {
+    const connectionValue = nextConnection || connectionFromProfile(profile);
+    const project = projectNameFromRoot(frameworkRoot);
+    const genericName = !profile.name
+      || /^local$/i.test(profile.name)
+      || /^remote(\s+\d+)?$/i.test(profile.name)
+      || /^远程(\s*\d+)?$/.test(profile.name);
+    const merged: HostProfile = {
+      ...profile,
+      name: (!genericName && profile.name) || project || profile.name || (connectionValue.mode === 'local' ? 'Local' : 'Remote'),
+      kind: connectionValue.mode === 'local' ? 'local' : 'remote',
+      agentUrl: connectionValue.agentUrl,
+      agentToken: connectionValue.token,
+      setupComplete: connectionValue.setupComplete,
+    };
+    const nextHosts = upsertHost(merged);
+    setHosts(nextHosts);
+    persistActiveHostId(merged.id);
+    setActiveHostId(merged.id);
+    saveConnection(connectionValue);
+    setConnection(connectionValue);
+  }, []);
+
+  const switchHost = useCallback((id: string) => {
+    const profile = hosts.find((host) => host.id === id);
+    if (!profile) return;
+    persistActiveHostId(id);
+    setActiveHostId(id);
+    const next = connectionFromProfile(profile);
+    saveConnection(next);
+    setConnection(next);
+    setSnapshot(null);
+    setHistory([]);
+    setError('');
+    setView('dashboard');
+  }, [hosts]);
 
   const reloadPage = useCallback(() => {
     window.location.reload();
   }, []);
 
+  const runLocalBootstrap = useCallback(async (seed: ClientConnection) => {
+    setBootstrapPhase('loading');
+    const result = await resolveLocalBootstrap(seed);
+    if (result.status === 'resumed') {
+      applyHost({ ...activeHost, kind: 'local' }, result.connection, result.config.frameworkRoot);
+      setConfig(result.config);
+      await applyLocale(result.config.language || i18n.language);
+      setBootstrapPhase('ready');
+      return;
+    }
+    if (result.status === 'offline') {
+      setBootstrapPhase('offline');
+      return;
+    }
+    setBootstrapPhase('ready');
+  }, [activeHost, applyHost, i18n.language]);
+
   useEffect(() => {
-    const onKeyDown = (event: KeyboardEvent) => {
+    if (connection.setupComplete) {
+      setBootstrapPhase('ready');
+      return;
+    }
+    let active = true;
+    void (async () => {
+      await runLocalBootstrap(connection);
+      if (!active) return;
+    })();
+    return () => { active = false; };
+  // Bootstrap once on first paint; connection seed is intentional.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  useEffect(() => {
+    const onKeyDown = (event: globalThis.KeyboardEvent) => {
       const key = event.key;
       const mod = event.metaKey || event.ctrlKey;
       // Desktop native menu also binds Cmd/Ctrl+R + F5; this covers pure Web / when menu misses.
@@ -104,6 +202,15 @@ export default function App() {
         if (!active) return;
         setConfig(next);
         void applyLocale(next.language || i18n.language);
+        const project = projectNameFromRoot(next.frameworkRoot);
+        const current = getActiveHost();
+        const genericName = !current.name
+          || /^local$/i.test(current.name)
+          || /^remote(\s+\d+)?$/i.test(current.name)
+          || /^远程(\s*\d+)?$/.test(current.name);
+        if (project && genericName) {
+          setHosts(upsertHost({ ...current, name: project }));
+        }
       })
       .catch((reason) => active && setError(messageOf(reason)));
     void refreshSnapshot();
@@ -174,21 +281,42 @@ export default function App() {
       configured: Boolean(nextConfig.frameworkRoot || existing.frameworkRoot),
     });
     const finalized = { ...sessionConnection, setupComplete: true };
-    saveConnection(finalized);
-    setConnection(finalized);
+    applyHost({ ...activeHost }, finalized, saved.frameworkRoot);
     setConfig(saved);
     await applyLocale(saved.language);
   };
 
-  const saveSettings = async (nextConnection: ClientConnection, nextConfig: PublicConfig) => {
+  const saveSettings = async (
+    nextConnection: ClientConnection,
+    nextConfig: PublicConfig,
+    nextProfile?: HostProfile,
+  ) => {
     const settingsTransport = new AgentTransport(nextConnection);
     const saved = await settingsTransport.saveConfig(nextConfig);
-    saveConnection(nextConnection);
-    setConnection(nextConnection);
+    applyHost(nextProfile || { ...activeHost }, nextConnection, saved.frameworkRoot);
     setConfig(saved);
     await applyLocale(saved.language);
     setError('');
   };
+
+  if (bootstrapPhase === 'loading') {
+    return (
+      <main className="setup-shell">
+        <section className="setup-form-panel offline-gate">
+          <p className="eyebrow">{t('brand.product')}</p>
+          <p>{t('common.loading')}</p>
+        </section>
+      </main>
+    );
+  }
+
+  if (bootstrapPhase === 'offline') {
+    return (
+      <OfflineGate
+        onRetry={() => void runLocalBootstrap(connectionFromProfile(getActiveHost()))}
+      />
+    );
+  }
 
   if (!connection.setupComplete) {
     return (
@@ -202,24 +330,49 @@ export default function App() {
 
   const onlineCount = snapshot?.instances.filter((instance) => instance.isRunning).length ?? 0;
 
+  const openWlsPanelExternal = () => {
+    const panelUrl = withWlsPanelPath(snapshot?.adminUrl || config.adminUrl || '');
+    if (!panelUrl) {
+      setError(t('panel.missing'));
+      setView('settings');
+      return;
+    }
+    void transport.openExternal(panelUrl);
+  };
+
   return (
     <div className="app-shell">
       <aside className="sidebar">
         <Brand />
         <nav className="main-nav" aria-label="Primary navigation">
-          {navigation.map((item) => (
+          {navigation.map((item) => {
+            const isExternal = item.id === 'panel';
+            return (
             <button
               key={item.id}
-              className={view === item.id ? 'nav-item active' : 'nav-item'}
-              onClick={() => setView(item.id)}
-              aria-label={t(`navigation.${item.id}`)}
-              title={t(`navigation.${item.id}`)}
-              aria-current={view === item.id ? 'page' : undefined}
+              className={view === item.id && !isExternal ? 'nav-item active' : isExternal ? 'nav-item nav-item-external' : 'nav-item'}
+              onClick={() => {
+                if (isExternal) {
+                  openWlsPanelExternal();
+                  return;
+                }
+                setView(item.id);
+              }}
+              aria-label={isExternal ? t('panel.openExternalHint') : t(`navigation.${item.id}`)}
+              title={isExternal ? t('panel.openExternalHint') : t(`navigation.${item.id}`)}
+              aria-current={view === item.id && !isExternal ? 'page' : undefined}
             >
-              <span className="nav-icon" aria-hidden="true">{item.icon}</span>
-              <span className="nav-label">{t(`navigation.${item.id}`)}</span>
+              <span className="nav-icon" aria-hidden="true">
+                {item.icon}
+                {isExternal ? <span className="nav-external-mark nav-external-mark-icon" aria-hidden="true">↗</span> : null}
+              </span>
+              <span className="nav-label">
+                {t(`navigation.${item.id}`)}
+                {isExternal ? <span className="nav-external-mark" aria-hidden="true">↗</span> : null}
+              </span>
             </button>
-          ))}
+            );
+          })}
         </nav>
         <div className="sidebar-status">
           <span className={error ? 'status-dot danger' : 'status-dot'} />
@@ -233,12 +386,18 @@ export default function App() {
       <main className="main-content">
         <header className="topbar">
           <div className="topbar-context">
-            <span className="mobile-brand">W</span>
+            <img className="mobile-brand" src="/logo.png" alt="" width={32} height={32} />
             <div>
               <strong>{snapshot?.host.hostname || t('brand.agent')}</strong>
               <small>{onlineCount} {t('dashboard.onlineInstances').toLowerCase()} · v{snapshot?.agentVersion ?? '0.1.0'}</small>
             </div>
           </div>
+          <HostSwitcher
+            hosts={hosts}
+            activeHost={activeHost}
+            frameworkRoot={config.frameworkRoot || snapshot?.frameworkRoot}
+            onSwitch={switchHost}
+          />
           <div className="topbar-actions">
             <span className="live-chip"><span /> LIVE</span>
             <button
@@ -281,6 +440,20 @@ export default function App() {
             loading={loading}
             busyAction={busyAction}
             onControl={runControl}
+            hosts={hosts}
+            activeHostId={activeHost.id}
+            frameworkRoot={config.frameworkRoot || snapshot?.frameworkRoot}
+            onSelectHost={(id) => {
+              switchHost(id);
+            }}
+          />
+        )}
+        {view === 'fleet' && (
+          <FleetOverview
+            hosts={hosts}
+            activeId={activeHost.id}
+            activeFrameworkRoot={config.frameworkRoot || snapshot?.frameworkRoot}
+            onSelect={switchHost}
           />
         )}
         {view === 'instances' && (
@@ -300,14 +473,37 @@ export default function App() {
           />
         )}
         {view === 'console' && (
-          <ConsoleView result={consoleResult} busy={busyAction === 'console'} onRun={runCommand} />
+          <ConsoleView
+            result={consoleResult}
+            busy={busyAction === 'console'}
+            onRun={runCommand}
+            onLoadCatalog={() => transport.listConsoleCommands()}
+          />
         )}
-        {view === 'panel' && <PanelView url={snapshot?.adminUrl || config.adminUrl || ''} transport={transport} />}
+        {view === 'terminal' && (
+          <TerminalView
+            profile={activeHost}
+            agentToken={connection.token}
+            onProfileChange={(next) => {
+              setHosts(upsertHost(next));
+            }}
+            onOpenFleet={() => setView('fleet')}
+            onOpenSettings={() => setView('settings')}
+          />
+        )}
         {view === 'updates' && (
           <UpdatesView config={config} info={updateInfo} busy={busyAction === 'update'} onCheck={checkUpdate} />
         )}
         {view === 'settings' && (
-          <SettingsView connection={connection} config={config} onSave={saveSettings} />
+          <SettingsView
+            connection={connection}
+            config={config}
+            profile={activeHost}
+            hosts={hosts}
+            onSave={saveSettings}
+            onHostsChange={setHosts}
+            onSwitchHost={switchHost}
+          />
         )}
       </main>
 
@@ -322,82 +518,171 @@ export default function App() {
   );
 }
 
+function BrandMark({ large = false }: { large?: boolean }) {
+  return (
+    <img
+      className={large ? 'brand-mark large' : 'brand-mark'}
+      src="/logo.png"
+      alt="Weline"
+      width={large ? 52 : 42}
+      height={large ? 52 : 42}
+    />
+  );
+}
+
 function Brand() {
   const { t } = useTranslation();
   return (
     <div className="brand-lockup">
-      <div className="brand-mark">W</div>
+      <BrandMark />
       <div><strong>{t('brand.name')}</strong><small>{t('brand.product')}</small></div>
     </div>
   );
 }
 
-function DashboardView({ snapshot, history, loading, busyAction, onControl }: {
+type DashboardMode = 'current' | 'fleet';
+
+function loadDashboardMode(): DashboardMode {
+  try {
+    const saved = localStorage.getItem('weline.dashboardMode');
+    return saved === 'fleet' ? 'fleet' : 'current';
+  } catch {
+    return 'current';
+  }
+}
+
+function DashboardView({
+  snapshot,
+  history,
+  loading,
+  busyAction,
+  onControl,
+  hosts,
+  activeHostId,
+  frameworkRoot,
+  onSelectHost,
+}: {
   snapshot: DashboardSnapshot | null;
   history: Array<{ cpu: number; memory: number }>;
   loading: boolean;
   busyAction: string;
   onControl: (action: string, instance?: string) => Promise<void>;
+  hosts: HostProfile[];
+  activeHostId: string;
+  frameworkRoot?: string | null;
+  onSelectHost: (id: string) => void;
 }) {
   const { t } = useTranslation();
+  const [mode, setMode] = useState<DashboardMode>(() => loadDashboardMode());
   const running = snapshot?.instances.filter((instance) => instance.isRunning) ?? [];
   const primary = running[0];
   const memoryPercent = snapshot ? percent(snapshot.host.memoryUsedBytes, snapshot.host.memoryTotalBytes) : 0;
   const disk = snapshot?.host.disks[0];
   const diskAvailable = disk ? percent(disk.availableBytes, disk.totalBytes) : 0;
+
+  const setDashboardMode = (next: DashboardMode) => {
+    setMode(next);
+    try { localStorage.setItem('weline.dashboardMode', next); } catch { /* ignore */ }
+  };
+
   return (
     <div className="page page-dashboard">
-      <section className="hero-panel">
-        <div>
-          <p className="eyebrow">{t('dashboard.eyebrow')}</p>
-          <h1>{t('dashboard.title')}</h1>
-          <p className="hero-copy">{t('dashboard.subtitle')}</p>
-          <div className="hero-meta">
-            <span><i className={running.length ? 'status-dot' : 'status-dot muted'} />{running.length} {t('dashboard.onlineInstances')}</span>
-            <span>{snapshot?.processes.length ?? 0} {t('dashboard.trackedProcesses')}</span>
-          </div>
-        </div>
-        <div className="hero-control">
-          <span className="hero-control-label">{t('dashboard.quickControl')}</span>
-          <strong>{primary?.name ?? 'default'}</strong>
-          <small>{primary?.url ?? t('dashboard.noRunning')}</small>
-          <div className="control-row">
-            {primary ? (
-              <>
-                <ActionButton label={t('common.restart')} action="restart" instance={primary.name} busyAction={busyAction} onControl={onControl} />
-                <ActionButton label={t('common.stop')} action="stop" instance={primary.name} busyAction={busyAction} onControl={onControl} tone="quiet" />
-              </>
-            ) : (
-              <ActionButton label={t('common.start')} action="start" instance="default" busyAction={busyAction} onControl={onControl} />
-            )}
-          </div>
-        </div>
-      </section>
+      <div className="dashboard-mode-bar" role="tablist" aria-label={t('dashboard.modeLabel')}>
+        <button
+          type="button"
+          role="tab"
+          aria-selected={mode === 'current'}
+          className={mode === 'current' ? 'mode-chip active' : 'mode-chip'}
+          onClick={() => setDashboardMode('current')}
+        >
+          {t('dashboard.modeCurrent')}
+        </button>
+        <button
+          type="button"
+          role="tab"
+          aria-selected={mode === 'fleet'}
+          className={mode === 'fleet' ? 'mode-chip active' : 'mode-chip'}
+          onClick={() => setDashboardMode('fleet')}
+        >
+          {t('dashboard.modeFleet')}
+          <span className="mode-chip-count">{hosts.length}</span>
+        </button>
+      </div>
 
-      <section className="metric-grid" aria-busy={loading}>
-        <MetricCard label={t('dashboard.cpu')} value={`${(snapshot?.host.cpuUsagePercent ?? 0).toFixed(1)}%`} detail={`${snapshot?.host.cpuCores ?? 0} cores`} percentValue={snapshot?.host.cpuUsagePercent ?? 0} />
-        <MetricCard label={t('dashboard.memory')} value={`${memoryPercent.toFixed(1)}%`} detail={snapshot ? `${formatBytes(snapshot.host.memoryUsedBytes)} / ${formatBytes(snapshot.host.memoryTotalBytes)}` : '—'} percentValue={memoryPercent} />
-        <MetricCard label={t('dashboard.disk')} value={`${diskAvailable.toFixed(1)}%`} detail={disk ? `${formatBytes(disk.availableBytes)} free` : '—'} percentValue={diskAvailable} />
-        <MetricCard label={t('dashboard.uptime')} value={formatUptime(snapshot?.host.uptimeSeconds ?? 0)} detail={snapshot ? `${snapshot.host.osName} ${snapshot.host.osVersion}` : '—'} />
-      </section>
+      {mode === 'fleet' ? (
+        <section className="dashboard-fleet-panel">
+          <header className="page-header compact">
+            <div>
+              <h1>{t('fleet.title')}</h1>
+              <p>{t('dashboard.fleetHint')}</p>
+            </div>
+          </header>
+          <FleetOverview
+            embedded
+            hosts={hosts}
+            activeId={activeHostId}
+            activeFrameworkRoot={frameworkRoot}
+            onSelect={(id) => {
+              onSelectHost(id);
+              setDashboardMode('current');
+            }}
+          />
+        </section>
+      ) : (
+        <>
+          <section className="hero-panel">
+            <div>
+              <p className="eyebrow">{t('dashboard.eyebrow')}</p>
+              <h1>{t('dashboard.title')}</h1>
+              <p className="hero-copy">{t('dashboard.subtitle')}</p>
+              <div className="hero-meta">
+                <span><i className={running.length ? 'status-dot' : 'status-dot muted'} />{running.length} {t('dashboard.onlineInstances')}</span>
+                <span>{snapshot?.processes.length ?? 0} {t('dashboard.trackedProcesses')}</span>
+              </div>
+            </div>
+            <div className="hero-control">
+              <span className="hero-control-label">{t('dashboard.quickControl')}</span>
+              <strong>{primary?.name ?? 'default'}</strong>
+              <small>{primary?.url ?? t('dashboard.noRunning')}</small>
+              <div className="control-row">
+                {primary ? (
+                  <>
+                    <ActionButton label={t('common.restart')} action="restart" instance={primary.name} busyAction={busyAction} onControl={onControl} />
+                    <ActionButton label={t('common.stop')} action="stop" instance={primary.name} busyAction={busyAction} onControl={onControl} tone="quiet" />
+                  </>
+                ) : (
+                  <ActionButton label={t('common.start')} action="start" instance="default" busyAction={busyAction} onControl={onControl} />
+                )}
+              </div>
+            </div>
+          </section>
 
-      <section className="dashboard-grid">
-        <article className="panel performance-panel">
-          <PanelHeading title={t('dashboard.performance')} meta={t('dashboard.lastUpdated')} />
-          <Sparkline history={history} />
-          <div className="chart-legend"><span className="cpu">{t('dashboard.cpu')}</span><span className="memory">{t('dashboard.memory')}</span></div>
-        </article>
-        <article className="panel process-panel">
-          <PanelHeading title={t('dashboard.processTitle')} meta={`${snapshot?.processes.length ?? 0}`} />
-          <p className="panel-hint">{t('dashboard.processHint')}</p>
-          <ProcessList processes={snapshot?.processes.slice(0, 7) ?? []} />
-        </article>
-      </section>
+          <section className="metric-grid" aria-busy={loading}>
+            <MetricCard label={t('dashboard.cpu')} value={`${(snapshot?.host.cpuUsagePercent ?? 0).toFixed(1)}%`} detail={`${snapshot?.host.cpuCores ?? 0} cores`} percentValue={snapshot?.host.cpuUsagePercent ?? 0} />
+            <MetricCard label={t('dashboard.memory')} value={`${memoryPercent.toFixed(1)}%`} detail={snapshot ? `${formatBytes(snapshot.host.memoryUsedBytes)} / ${formatBytes(snapshot.host.memoryTotalBytes)}` : '—'} percentValue={memoryPercent} />
+            <MetricCard label={t('dashboard.disk')} value={`${diskAvailable.toFixed(1)}%`} detail={disk ? `${formatBytes(disk.availableBytes)} free` : '—'} percentValue={diskAvailable} />
+            <MetricCard label={t('dashboard.uptime')} value={formatUptime(snapshot?.host.uptimeSeconds ?? 0)} detail={snapshot ? `${snapshot.host.osName} ${snapshot.host.osVersion}` : '—'} />
+          </section>
 
-      <footer className="page-footer">
-        <span>{t('dashboard.frameworkRoot')}</span><code>{snapshot?.frameworkRoot ?? '—'}</code>
-        <time>{snapshot ? new Date(snapshot.generatedAt).toLocaleTimeString() : '—'}</time>
-      </footer>
+          <section className="dashboard-grid">
+            <article className="panel performance-panel">
+              <PanelHeading title={t('dashboard.performance')} meta={t('dashboard.lastUpdated')} />
+              <Sparkline history={history} />
+              <div className="chart-legend"><span className="cpu">{t('dashboard.cpu')}</span><span className="memory">{t('dashboard.memory')}</span></div>
+            </article>
+            <article className="panel process-panel">
+              <PanelHeading title={t('dashboard.processTitle')} meta={`${snapshot?.processes.length ?? 0}`} />
+              <p className="panel-hint">{t('dashboard.processHint')}</p>
+              <ProcessList processes={snapshot?.processes.slice(0, 7) ?? []} />
+            </article>
+          </section>
+
+          <footer className="page-footer">
+            <span>{t('dashboard.frameworkRoot')}</span><code>{snapshot?.frameworkRoot ?? '—'}</code>
+            <time>{snapshot ? new Date(snapshot.generatedAt).toLocaleTimeString() : '—'}</time>
+          </footer>
+        </>
+      )}
     </div>
   );
 }
@@ -477,6 +762,157 @@ function InstancesView({ snapshot, busyAction, onControl }: {
         ))}
       </div>
     </Page>
+  );
+}
+
+function DomainPoolCombobox({
+  pool,
+  value,
+  onChange,
+  placeholder,
+  searchPlaceholder,
+  emptyLabel,
+  noMatchLabel,
+  disabled = false,
+}: {
+  pool: DomainPoolRecord[];
+  value: string;
+  onChange: (poolId: string) => void;
+  placeholder: string;
+  searchPlaceholder: string;
+  emptyLabel: string;
+  noMatchLabel: string;
+  disabled?: boolean;
+}) {
+  const rootRef = useRef<HTMLDivElement>(null);
+  const inputRef = useRef<HTMLInputElement>(null);
+  const listId = 'website-domain-pool-list';
+  const [open, setOpen] = useState(false);
+  const [query, setQuery] = useState('');
+  const [highlight, setHighlight] = useState(0);
+
+  const selected = useMemo(
+    () => pool.find((row) => String(row.poolId) === value) || null,
+    [pool, value],
+  );
+
+  const filtered = useMemo(() => filterDomainPool(pool, query), [pool, query]);
+
+  useEffect(() => {
+    if (!open) return;
+    setHighlight(0);
+  }, [query, open]);
+
+  useEffect(() => {
+    if (!open) return;
+    const onPointerDown = (event: MouseEvent) => {
+      if (!rootRef.current?.contains(event.target as Node)) {
+        setOpen(false);
+        setQuery('');
+      }
+    };
+    const onKeyDown = (event: globalThis.KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        setOpen(false);
+        setQuery('');
+        inputRef.current?.blur();
+      }
+    };
+    document.addEventListener('mousedown', onPointerDown);
+    document.addEventListener('keydown', onKeyDown);
+    return () => {
+      document.removeEventListener('mousedown', onPointerDown);
+      document.removeEventListener('keydown', onKeyDown);
+    };
+  }, [open]);
+
+  const pick = (poolId: string) => {
+    onChange(poolId);
+    setOpen(false);
+    setQuery('');
+  };
+
+  const onInputKeyDown = (event: ReactKeyboardEvent<HTMLInputElement>) => {
+    if (event.key === 'ArrowDown') {
+      event.preventDefault();
+      if (!open) {
+        setOpen(true);
+        return;
+      }
+      setHighlight((index) => Math.min(index + 1, Math.max(filtered.length - 1, 0)));
+      return;
+    }
+    if (event.key === 'ArrowUp') {
+      event.preventDefault();
+      setHighlight((index) => Math.max(index - 1, 0));
+      return;
+    }
+    if (event.key === 'Enter') {
+      if (!open || filtered.length === 0) return;
+      event.preventDefault();
+      const row = filtered[highlight];
+      if (row) pick(String(row.poolId));
+    }
+  };
+
+  const displayValue = open ? query : (selected?.domain || '');
+
+  return (
+    <div className={`domain-pool-combobox${open ? ' is-open' : ''}`} ref={rootRef}>
+      <input type="hidden" name="pool_id" value={value} required />
+      <input
+        ref={inputRef}
+        type="search"
+        role="combobox"
+        aria-expanded={open}
+        aria-controls={listId}
+        aria-autocomplete="list"
+        aria-activedescendant={open && filtered[highlight] ? `${listId}-${filtered[highlight].poolId}` : undefined}
+        value={displayValue}
+        placeholder={pool.length === 0 ? emptyLabel : (open ? searchPlaceholder : placeholder)}
+        disabled={disabled || pool.length === 0}
+        autoComplete="off"
+        spellCheck={false}
+        onFocus={() => {
+          setOpen(true);
+          setQuery('');
+        }}
+        onChange={(event) => {
+          setQuery(event.target.value);
+          setOpen(true);
+          if (value) onChange('');
+        }}
+        onKeyDown={onInputKeyDown}
+      />
+      {open && pool.length > 0 && (
+        <ul className="domain-pool-combobox-list" id={listId} role="listbox">
+          {filtered.length === 0 ? (
+            <li className="domain-pool-combobox-empty" role="presentation">{noMatchLabel}</li>
+          ) : filtered.map((row, index) => {
+            const id = String(row.poolId);
+            const active = index === highlight;
+            const selectedRow = id === value;
+            return (
+              <li
+                key={id}
+                id={`${listId}-${id}`}
+                role="option"
+                aria-selected={selectedRow}
+                className={`domain-pool-combobox-option${active ? ' is-active' : ''}${selectedRow ? ' is-selected' : ''}`}
+                onMouseEnter={() => setHighlight(index)}
+                onMouseDown={(event) => {
+                  event.preventDefault();
+                  pick(id);
+                }}
+              >
+                <strong>{row.domain}</strong>
+                {row.rootDomain && row.rootDomain !== row.domain ? <small>{row.rootDomain}</small> : null}
+              </li>
+            );
+          })}
+        </ul>
+      )}
+    </div>
   );
 }
 
@@ -580,12 +1016,16 @@ function WebsitesView({
             <label>{t('websites.code')}<input value={code} onChange={(event) => setCode(event.target.value)} placeholder={t('websites.codeHint')} autoComplete="off" /></label>
             <label className="wide-field">
               {t('websites.url')}
-              <select value={poolId} onChange={(event) => onPoolChange(event.target.value)} required>
-                <option value="">{t('websites.poolPlaceholder')}</option>
-                {pool.map((row) => (
-                  <option key={row.poolId} value={String(row.poolId)}>{row.domain}</option>
-                ))}
-              </select>
+              <DomainPoolCombobox
+                pool={pool}
+                value={poolId}
+                onChange={onPoolChange}
+                placeholder={t('websites.poolPlaceholder')}
+                searchPlaceholder={t('websites.poolSearch')}
+                emptyLabel={t('websites.poolEmpty')}
+                noMatchLabel={t('websites.poolNoMatch')}
+                disabled={creating}
+              />
               <small className="field-hint">
                 {pool.length === 0 ? t('websites.poolEmpty') : t('websites.poolHint')}
                 {backendDomainUrl ? (
@@ -771,110 +1211,6 @@ function SitesView({
   );
 }
 
-function ConsoleView({ result, busy, onRun }: { result: CommandResult | null; busy: boolean; onRun: (command: string) => Promise<void> }) {
-  const { t } = useTranslation();
-  const [command, setCommand] = useState('php bin/w server:status --doctor --json');
-  const submit = (event: FormEvent) => { event.preventDefault(); void onRun(command); };
-  return (
-    <Page title={t('console.title')} subtitle={t('console.subtitle')}>
-      <div className="console-shell">
-        <div className="console-safety"><span>⌁</span>{t('console.safeBoundary')}</div>
-        <form className="command-form" onSubmit={submit}>
-          <span className="prompt">›</span>
-          <input value={command} onChange={(event) => setCommand(event.target.value)} placeholder={t('console.placeholder')} spellCheck={false} />
-          <button className="primary-button" disabled={busy}>{busy ? t('common.loading') : t('console.run')}</button>
-        </form>
-        <div className="terminal-output" aria-live="polite">
-          <div className="terminal-toolbar"><span>{t('console.history')}</span>{result && <span className={result.exitCode === 0 ? 'exit-success' : 'exit-error'}>{t('console.exitCode', { code: result.exitCode })} · {result.durationMs}ms</span>}</div>
-          <pre>{result ? [result.stdout, result.stderr].filter(Boolean).join('\n') : t('console.empty')}</pre>
-        </div>
-      </div>
-    </Page>
-  );
-}
-
-function PanelView({ url, transport }: { url: string; transport: AgentTransport }) {
-  const { t } = useTranslation();
-  const panelUrl = withWlsPanelPath(url);
-  const [embedFailed, setEmbedFailed] = useState(false);
-  const [loading, setLoading] = useState(Boolean(panelUrl));
-  const [failReason, setFailReason] = useState<'blocked' | 'empty' | 'timeout'>('blocked');
-  const loadTimerRef = useRef<number | null>(null);
-  const clearLoadTimer = () => {
-    if (loadTimerRef.current !== null) {
-      window.clearTimeout(loadTimerRef.current);
-      loadTimerRef.current = null;
-    }
-  };
-  useEffect(() => {
-    setEmbedFailed(false);
-    setLoading(Boolean(panelUrl));
-    setFailReason('blocked');
-    clearLoadTimer();
-    if (!panelUrl) return undefined;
-    // Cross-origin X-Frame blocks often leave a dark empty iframe with no onError.
-    loadTimerRef.current = window.setTimeout(() => {
-      setFailReason('timeout');
-      setEmbedFailed(true);
-      setLoading(false);
-      loadTimerRef.current = null;
-    }, 8000);
-    return () => clearLoadTimer();
-  }, [panelUrl]);
-  const openPanel = () => {
-    if (panelUrl) void transport.openExternal(panelUrl);
-  };
-  const failMessage = failReason === 'timeout'
-    ? t('panel.embedTimeout')
-    : failReason === 'empty'
-      ? t('panel.embedEmpty')
-      : t('panel.embedBlocked');
-  return (
-    <Page title={t('panel.title')} subtitle={t('panel.subtitle')} action={panelUrl ? <button type="button" className="secondary-button" onClick={openPanel}>{t('common.open')} ↗</button> : undefined}>
-      {panelUrl ? (
-        embedFailed ? (
-          <div className="embedded-panel panel-fallback">
-            <div className="empty-state">
-              <span>◇</span>
-              <p>{failMessage}</p>
-              <button type="button" className="primary-button" onClick={openPanel}>{t('panel.openWindow')}</button>
-            </div>
-          </div>
-        ) : (
-          <div className="embedded-panel">
-            <div className="frame-notice">{loading ? t('panel.loading') : t('panel.frameHint')}</div>
-            <iframe
-              title={t('panel.title')}
-              src={panelUrl}
-              referrerPolicy="origin"
-              sandbox="allow-same-origin allow-scripts allow-forms allow-popups allow-popups-to-escape-sandbox allow-downloads"
-              onError={() => {
-                clearLoadTimer();
-                setFailReason('blocked');
-                setEmbedFailed(true);
-                setLoading(false);
-              }}
-              onLoad={(event) => {
-                clearLoadTimer();
-                setLoading(false);
-                try {
-                  const doc = event.currentTarget.contentDocument;
-                  if (doc && doc.body && doc.body.childElementCount === 0 && !doc.body.innerText.trim()) {
-                    setFailReason('empty');
-                    setEmbedFailed(true);
-                  }
-                } catch {
-                  /* cross-origin: headers may still allow paint; keep iframe */
-                }
-              }}
-            />
-          </div>
-        )
-      ) : <EmptyState>{t('panel.missing')}</EmptyState>}
-    </Page>
-  );
-}
-
 function withWlsPanelPath(url: string): string {
   const trimmed = url.trim();
   if (!trimmed) return '';
@@ -901,24 +1237,172 @@ function UpdatesView({ config, info, busy, onCheck }: { config: PublicConfig; in
   );
 }
 
-function SettingsView({ connection, config, onSave }: { connection: ClientConnection; config: PublicConfig; onSave: (connection: ClientConnection, config: PublicConfig) => Promise<void> }) {
+function SettingsView({
+  connection,
+  config,
+  profile,
+  hosts,
+  onSave,
+  onHostsChange,
+  onSwitchHost,
+}: {
+  connection: ClientConnection;
+  config: PublicConfig;
+  profile: HostProfile;
+  hosts: HostProfile[];
+  onSave: (connection: ClientConnection, config: PublicConfig, profile?: HostProfile) => Promise<void>;
+  onHostsChange: (hosts: HostProfile[]) => void;
+  onSwitchHost: (id: string) => void;
+}) {
   const { t } = useTranslation();
   const [draftConnection, setDraftConnection] = useState(connection);
   const [draftConfig, setDraftConfig] = useState(config);
+  const [draftProfile, setDraftProfile] = useState(profile);
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
-  useEffect(() => { setDraftConnection(connection); setDraftConfig(config); }, [connection, config]);
+  const [apiPassword, setApiPassword] = useState('');
+  const [apiStatus, setApiStatus] = useState('');
+  const [apiBusy, setApiBusy] = useState(false);
+  useEffect(() => {
+    setDraftConnection(connection);
+    setDraftConfig(config);
+    setDraftProfile(profile);
+  }, [connection, config, profile]);
   const submit = async (event: FormEvent) => {
     event.preventDefault(); setSaving(true); setSaved(false);
-    try { await onSave(draftConnection, draftConfig); setSaved(true); } finally { setSaving(false); }
+    try {
+      const nextProfile: HostProfile = {
+        ...draftProfile,
+        kind: draftConnection.mode === 'local' ? 'local' : 'remote',
+        agentUrl: draftConnection.agentUrl,
+        agentToken: draftConnection.token,
+        setupComplete: draftConnection.setupComplete,
+      };
+      await onSave(draftConnection, draftConfig, nextProfile);
+      onHostsChange(loadHosts());
+      setSaved(true);
+    } finally {
+      setSaving(false);
+    }
   };
+  const addRemote = () => {
+    const created = createBlankRemoteHost(`${t('hosts.remote')} ${hosts.length + 1}`);
+    onHostsChange(upsertHost(created));
+    onSwitchHost(created.id);
+  };
+  const deleteActive = () => {
+    if (hosts.length <= 1) return;
+    onHostsChange(removeHost(profile.id));
+    const nextId = getActiveHostId() || loadHosts()[0]?.id;
+    if (nextId) onSwitchHost(nextId);
+  };
+  const loginApi = async () => {
+    setApiBusy(true);
+    setApiStatus('');
+    try {
+      const baseUrl = (draftProfile.siteBaseUrl || '').trim();
+      if (!baseUrl || !draftProfile.apiUsername || !apiPassword) {
+        throw new Error(t('hosts.apiMissing'));
+      }
+      const sdk = new FrameworkApiSdk({
+        profileId: draftProfile.id,
+        baseUrl,
+        loginPath: draftProfile.apiLoginPath || '/api/api/rest/v1/auth/login',
+      });
+      await sdk.login(draftProfile.apiUsername, apiPassword);
+      setApiPassword('');
+      setApiStatus(t('hosts.apiOk'));
+      onHostsChange(upsertHost(draftProfile));
+    } catch (reason) {
+      setApiStatus(reason instanceof Error ? reason.message : String(reason));
+    } finally {
+      setApiBusy(false);
+    }
+  };
+  const loggedIn = Boolean(loadFrameworkTokens(draftProfile.id)?.accessToken);
   return (
     <Page title={t('settings.title')} subtitle={t('settings.subtitle')}>
       <form className="settings-form" onSubmit={submit}>
+        <fieldset className="settings-block">
+          <legend>{t('hosts.title')}</legend>
+          <label>{t('hosts.name')}
+            <input value={draftProfile.name} onChange={(e) => setDraftProfile({ ...draftProfile, name: e.target.value })} />
+          </label>
+          <div className="form-actions">
+            <button type="button" className="quiet-button" onClick={addRemote}>{t('hosts.addRemote')}</button>
+            <button type="button" className="quiet-button" onClick={deleteActive} disabled={hosts.length <= 1}>{t('hosts.remove')}</button>
+          </div>
+        </fieldset>
         <SettingsFields connection={draftConnection} config={draftConfig} onConnection={setDraftConnection} onConfig={setDraftConfig} />
+        <fieldset className="settings-block">
+          <legend>{t('hosts.apiTitle')}</legend>
+          <label>{t('hosts.siteBaseUrl')}
+            <input
+              value={draftProfile.siteBaseUrl || ''}
+              onChange={(e) => setDraftProfile({ ...draftProfile, siteBaseUrl: e.target.value })}
+              placeholder="https://example.com"
+            />
+          </label>
+          <label>{t('hosts.apiUsername')}
+            <input
+              value={draftProfile.apiUsername || ''}
+              onChange={(e) => setDraftProfile({ ...draftProfile, apiUsername: e.target.value })}
+              autoComplete="username"
+            />
+          </label>
+          <label>{t('hosts.apiPassword')}
+            <input type="password" value={apiPassword} onChange={(e) => setApiPassword(e.target.value)} autoComplete="current-password" />
+          </label>
+          <label>{t('hosts.apiLoginPath')}
+            <input
+              value={draftProfile.apiLoginPath || '/api/api/rest/v1/auth/login'}
+              onChange={(e) => setDraftProfile({ ...draftProfile, apiLoginPath: e.target.value })}
+            />
+          </label>
+          <div className="form-actions">
+            <button type="button" className="quiet-button" disabled={apiBusy} onClick={() => void loginApi()}>
+              {apiBusy ? t('common.loading') : t('hosts.apiLogin')}
+            </button>
+            {loggedIn && (
+              <button type="button" className="text-button" onClick={() => { clearFrameworkTokens(draftProfile.id); setApiStatus(t('hosts.apiCleared')); }}>
+                {t('hosts.apiLogout')}
+              </button>
+            )}
+            {apiStatus && <span className="saved-message">{apiStatus}</span>}
+          </div>
+        </fieldset>
         <div className="form-actions"><button className="primary-button" disabled={saving}>{saving ? t('common.loading') : t('common.save')}</button>{saved && <span className="saved-message">✓ {t('settings.saved')}</span>}</div>
       </form>
     </Page>
+  );
+}
+
+function OfflineGate({ onRetry }: { onRetry: () => void }) {
+  const { t } = useTranslation();
+  return (
+    <main className="setup-shell">
+      <section className="setup-visual">
+        <div className="setup-brand"><BrandMark large /><strong>Weline</strong></div>
+        <div className="setup-visual-copy">
+          <span className="setup-badge">{t('brand.product')}</span>
+          <h1>{t('offline.title')}</h1>
+          <p>{t('offline.subtitle')}</p>
+        </div>
+        <div className="setup-orbit" aria-hidden="true"><span /><span /><span /><i>WLS</i></div>
+      </section>
+      <section className="setup-form-panel offline-gate">
+        <p className="eyebrow">{t('errors.unavailable')}</p>
+        <h2>{t('offline.heading')}</h2>
+        <p className="setup-step-copy">{t('offline.body')}</p>
+        <ol className="offline-steps">
+          <li><code>npm run agent</code> <span>{t('offline.orDesktop')}</span></li>
+          <li>{t('offline.thenRetry')}</li>
+        </ol>
+        <div className="step-actions">
+          <button type="button" className="primary-button" onClick={onRetry}>{t('errors.retry')}</button>
+        </div>
+      </section>
+    </main>
   );
 }
 
@@ -941,7 +1425,7 @@ function SetupWizard({ initialConnection, initialConfig, onComplete }: {
   return (
     <main className="setup-shell">
       <section className="setup-visual">
-        <div className="setup-brand"><div className="brand-mark large">W</div><strong>Weline</strong></div>
+        <div className="setup-brand"><BrandMark large /><strong>Weline</strong></div>
         <div className="setup-visual-copy"><span className="setup-badge">{t('setup.badge')}</span><h1>{t('setup.title')}</h1><p>{t('setup.subtitle')}</p></div>
         <div className="setup-orbit" aria-hidden="true"><span /><span /><span /><i>WLS</i></div>
       </section>

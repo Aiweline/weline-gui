@@ -1,16 +1,18 @@
+use crate::command_catalog::{DUMP_COMMANDS_PHP_SCRIPT, catalog_from_commands_php_json};
 use crate::command_policy::parse_framework_command;
 use crate::config::ConfigStore;
 use crate::models::{
-    AgentConfig, CertificateSiteReference, CommandResult, CreateWebsiteRequest, DashboardSnapshot,
-    DeleteCertificateRequest, DeleteCertificateResult, DiskMetrics, DomainPoolRecord, HostMetrics,
-    ProcessMetrics, PublicConfig, SiteStatus, UpdateInfo, WebsiteRecord, WlsInstance,
+    AgentConfig, CertificateSiteReference, CommandResult, ConsoleCommandCatalog,
+    CreateWebsiteRequest, DashboardSnapshot, DeleteCertificateRequest, DeleteCertificateResult,
+    DiskMetrics, DomainPoolRecord, HostMetrics, ProcessMetrics, PublicConfig, SiteStatus,
+    UpdateInfo, WebsiteRecord, WlsInstance,
 };
 use crate::{tls, update};
 use anyhow::{Context, Result, bail};
 use chrono::Utc;
 use serde::Deserialize;
 use std::collections::BTreeSet;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::process::Stdio;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -32,6 +34,7 @@ struct ServiceCache {
     instances: Option<(Instant, Vec<WlsInstance>)>,
     managed_domains: Option<(Instant, Vec<String>)>,
     sites: Option<(Instant, String, Vec<SiteStatus>)>,
+    console_commands: Option<(Instant, PathBuf, ConsoleCommandCatalog)>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -280,6 +283,51 @@ impl AgentService {
             }
         }
         Ok(result)
+    }
+
+    pub async fn list_console_commands(&self) -> Result<ConsoleCommandCatalog> {
+        let config = self.config().await;
+        assert_framework_root(&config.framework_root)?;
+        let commands_path = config
+            .framework_root
+            .join("generated")
+            .join("commands.php");
+        if !commands_path.is_file() {
+            bail!("generated/commands.php is missing; run php bin/w command:upgrade first");
+        }
+
+        if let Some((captured_at, cached_path, catalog)) = &self.cache.read().await.console_commands
+        {
+            if cached_path == &commands_path && captured_at.elapsed() < Duration::from_secs(120) {
+                return Ok(catalog.clone());
+            }
+        }
+
+        let mut command = Command::new(&config.php_binary);
+        command
+            .arg("-r")
+            .arg(DUMP_COMMANDS_PHP_SCRIPT.trim())
+            .current_dir(&config.framework_root)
+            .env("WELINE_COMMANDS_PATH", &commands_path)
+            .env("NO_COLOR", "1")
+            .stdin(Stdio::null())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .kill_on_drop(true);
+
+        let output = timeout(Duration::from_secs(20), command.output())
+            .await
+            .context("listing framework commands timed out")?
+            .context("failed to dump generated/commands.php")?;
+        if !output.status.success() {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            bail!("failed to read generated/commands.php: {}", stderr.trim());
+        }
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        let catalog = catalog_from_commands_php_json(stdout.trim())?;
+        self.cache.write().await.console_commands =
+            Some((Instant::now(), commands_path, catalog.clone()));
+        Ok(catalog)
     }
 
     pub async fn list_websites(&self) -> Result<Vec<WebsiteRecord>> {

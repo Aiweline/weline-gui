@@ -34,6 +34,20 @@ flowchart LR
 
 本机模式引导：`GET /api/v1/local-session`（peer 必须为 loopback）返回 `{ agentUrl, token, listen }`，之后所有受保护端点使用 `Authorization: Bearer <token>`。
 
+### 桌面 / 回环 Web 全通（客户端门禁）
+
+业务配置（框架目录、网站、域名池）以 **agent** 为准；各浏览器自己的 `localStorage.setupComplete` 只是缓存，不是第二套真相。
+
+回环打开控制中心时，前端走 `resolveLocalBootstrap` 三态：
+
+| 状态 | 条件 | UI |
+| --- | --- | --- |
+| `resumed` | `local-session` 成功且 `config.configured` + `frameworkRoot` | 直进主界面（跳过向导） |
+| `needs_setup` | agent 可达但尚未配置项目 | SetupWizard |
+| `offline` | agent 不可达 | OfflineGate（提示启动 `npm run agent` / 桌面端），**不**伪装成「选择宿主」 |
+
+非回环远程端仍显式填写 Agent URL + token。浏览器不会自动拉起 agent 进程。
+
 ### 传输边界（勿突破）
 
 | 允许 | 禁止 |
@@ -71,6 +85,14 @@ flowchart LR
 | GET | `/api/v1/websites` | 网站列表 |
 | GET | `/api/v1/websites/domain-pool` | 域名池列表 |
 | POST | `/api/v1/open-external` | 本机打开外部 URL（http/https） |
+| WS | `/api/v1/ssh/session?token=` | 内置 SSH 终端桥（Agent Bearer via query；首帧 JSON `connect` 含私钥 PEM，Agent **不持久化**） |
+
+### 多机 Host Profile（客户端）
+
+- `localStorage.weline.hosts` + `weline.activeHostId`：多 Host Profile；每档含 Agent URL/token、可选 Framework API 站点账户、SSH 元数据与 `sshPrivateKeyRef`（**永不存 PEM**）。
+- 私钥：Web 默认 `session_only` 内存；可选 WebCrypto 加密 IndexedDB；桌面后续 `os_keychain`。
+- Framework 业务 REST：GUI `FrameworkApiSdk` → 站点 `/api/api/rest/v1/auth/login`（账户登录，token 放 `sessionStorage` 按 profile 隔离）。
+- 内置终端：xterm.js → Agent `WS /api/v1/ssh/session` → OpenSSH PTY（仅公钥认证）。
 
 访问令牌不会通过配置 API 返回。服务实例缓存 10 秒、证书探测缓存 60 秒，以避免高频执行框架命令或 TLS 握手。
 
