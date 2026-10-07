@@ -212,3 +212,33 @@ export function describeHostDisplay(
     optionLabel: `${secondary} · ${project}`,
   };
 }
+
+export type HostSwitcherOption = {
+  host: HostProfile;
+  display: HostDisplayParts;
+};
+
+/** Case-insensitive filter for the searchable host switcher menu. */
+export function filterHostsForSwitcher(
+  options: HostSwitcherOption[],
+  query: string,
+): HostSwitcherOption[] {
+  const needle = query.trim().toLowerCase();
+  if (!needle) return options;
+  return options.filter((row) => {
+    const haystack = [
+      row.display.primary,
+      row.display.secondary,
+      row.display.optionLabel,
+      row.display.locationDetail,
+      row.host.name,
+      row.host.agentUrl,
+      row.host.frameworkRoot,
+      row.host.siteBaseUrl,
+    ]
+      .filter(Boolean)
+      .join(' ')
+      .toLowerCase();
+    return haystack.includes(needle);
+  });
+}

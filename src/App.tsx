@@ -20,9 +20,10 @@ import { backendDomainPoolUrl } from './api/projects';
 import { ConsoleView } from './components/ConsoleView';
 import { FleetOverview } from './components/FleetOverview';
 import { HostSwitcher } from './components/HostSwitcher';
+import { LanguageSwitcher } from './components/LanguageSwitcher';
 import { TerminalView } from './components/TerminalView';
-import { applyLocale } from './i18n';
-import { localeCatalog, normalizeLocale } from './i18n/catalog';
+import { applyLocale, preferredUiLocale } from './i18n';
+import { localeCatalog, localeDisplayOrder, normalizeLocale } from './i18n/catalog';
 import type {
   ClientConnection,
   CommandResult,
@@ -85,6 +86,7 @@ export default function App() {
   const [bootstrapPhase, setBootstrapPhase] = useState<'idle' | 'loading' | 'offline' | 'ready'>(() => (
     connectionFromProfile(getActiveHost()).setupComplete ? 'ready' : 'loading'
   ));
+  const localeHostKeyRef = useRef('');
 
   const transport = useMemo(() => new AgentTransport(connection), [connection]);
 
@@ -138,9 +140,15 @@ export default function App() {
     setBootstrapPhase('loading');
     const result = await resolveLocalBootstrap(seed);
     if (result.status === 'resumed') {
-      applyHost({ ...activeHost, kind: 'local' }, result.connection, result.config.frameworkRoot);
-      setConfig(result.config);
-      await applyLocale(result.config.language || i18n.language);
+      applyHost(
+        { ...activeHost, kind: 'local' },
+        result.connection,
+        result.config.frameworkRoot,
+        result.config.phpBinary,
+      );
+      const uiLocale = preferredUiLocale(result.config.language);
+      setConfig({ ...result.config, language: uiLocale });
+      await applyLocale(uiLocale);
       setBootstrapPhase('ready');
       return;
     }
@@ -204,26 +212,48 @@ export default function App() {
   useEffect(() => {
     if (!connection.setupComplete) return;
     let active = true;
+    const profile = activeHost;
     void (async () => {
       try {
         // Host switch / first paint: point the agent at this profile's bound project first.
-        const next = await activateHostProject(transport, activeHost);
+        const next = await activateHostProject(transport, profile);
         if (!active) return;
-        setConfig(next);
-        void applyLocale(next.language || i18n.language);
+        // Sticky client locale (system default, then user pick) wins over agent language.
+        const uiLocale = preferredUiLocale(next.language);
+        setConfig((previous) => ({
+          ...next,
+          // Keep an in-flight topbar change if the user switched while activate was running.
+          language: preferredUiLocale(previous.language || uiLocale),
+        }));
+        const hostLocaleKey = `${profile.id}|${profile.agentUrl}|${profile.agentToken}`;
+        if (localeHostKeyRef.current !== hostLocaleKey) {
+          localeHostKeyRef.current = hostLocaleKey;
+          const sticky = preferredUiLocale(uiLocale);
+          void applyLocale(sticky);
+          if (next.language !== sticky) {
+            void transport.saveConfig({ ...next, language: sticky })
+              .then((saved) => {
+                if (!active) return;
+                // Re-read sticky so a later user pick is never clobbered by this response.
+                setConfig({ ...saved, language: preferredUiLocale(saved.language) });
+              })
+              .catch(() => undefined);
+          }
+        }
         const project = projectNameFromRoot(next.frameworkRoot);
-        const genericName = !activeHost.name
-          || /^local$/i.test(activeHost.name)
-          || /^remote(\s+\d+)?$/i.test(activeHost.name)
-          || /^远程(\s*\d+)?$/.test(activeHost.name);
+        const genericName = !profile.name
+          || /^local$/i.test(profile.name)
+          || /^remote(\s+\d+)?$/i.test(profile.name)
+          || /^远程(\s*\d+)?$/.test(profile.name);
         const boundRoot = normalizeFrameworkRoot(next.frameworkRoot);
-        const needsBind = boundRoot && normalizeFrameworkRoot(activeHost.frameworkRoot) !== boundRoot;
-        if (project && (genericName || needsBind || !activeHost.phpBinary)) {
+        const needsBind = Boolean(boundRoot && normalizeFrameworkRoot(profile.frameworkRoot) !== boundRoot);
+        const needsPhp = Boolean(next.phpBinary && next.phpBinary !== profile.phpBinary);
+        if (project && (genericName || needsBind || needsPhp)) {
           setHosts(upsertHost({
-            ...activeHost,
-            name: genericName ? project : activeHost.name,
-            frameworkRoot: boundRoot || activeHost.frameworkRoot,
-            phpBinary: next.phpBinary || activeHost.phpBinary,
+            ...profile,
+            name: genericName ? project : profile.name,
+            frameworkRoot: boundRoot || profile.frameworkRoot,
+            phpBinary: next.phpBinary || profile.phpBinary,
           }));
         }
         await refreshSnapshot(true);
@@ -233,7 +263,18 @@ export default function App() {
       }
     })();
     return () => { active = false; };
-  }, [activeHost, connection.setupComplete, i18n.language, refreshSnapshot, transport]);
+  }, [
+    activeHost.id,
+    activeHost.frameworkRoot,
+    activeHost.phpBinary,
+    activeHost.name,
+    activeHost.agentUrl,
+    activeHost.agentToken,
+    connection.setupComplete,
+    i18n.language,
+    refreshSnapshot,
+    transport,
+  ]);
 
   useEffect(() => {
     if (!connection.setupComplete) return;
@@ -274,6 +315,26 @@ export default function App() {
       setBusyAction('');
     }
   };
+
+  const loadConsoleCatalog = useCallback(
+    () => transport.listConsoleCommands(),
+    [transport],
+  );
+
+  const changeLanguage = useCallback(async (locale: string) => {
+    const normalized = normalizeLocale(locale);
+    await applyLocale(normalized);
+    setConfig((previous) => ({ ...previous, language: normalized }));
+    if (!connection.setupComplete) return;
+    try {
+      const existing = await transport.config();
+      const saved = await transport.saveConfig({ ...existing, language: normalized });
+      setConfig(saved);
+      setError('');
+    } catch (reason) {
+      setError(messageOf(reason));
+    }
+  }, [connection.setupComplete, transport]);
 
   const checkUpdate = async () => {
     setBusyAction('update');
@@ -424,6 +485,10 @@ export default function App() {
             onSwitch={switchHost}
           />
           <div className="topbar-actions">
+            <LanguageSwitcher
+              value={config.language || i18n.language}
+              onChange={changeLanguage}
+            />
             <span className="live-chip"><span /> LIVE</span>
             <button
               type="button"
@@ -487,6 +552,7 @@ export default function App() {
         {view === 'websites' && (
           <WebsitesView
             transport={transport}
+            projectKey={normalizeFrameworkRoot(config.frameworkRoot) || activeHost.id}
             adminUrl={snapshot?.adminUrl || config.adminUrl || ''}
           />
         )}
@@ -499,10 +565,12 @@ export default function App() {
         )}
         {view === 'console' && (
           <ConsoleView
+            key={normalizeFrameworkRoot(config.frameworkRoot) || activeHost.id}
             result={consoleResult}
             busy={busyAction === 'console'}
+            frameworkRoot={config.frameworkRoot || activeHost.frameworkRoot || ''}
             onRun={runCommand}
-            onLoadCatalog={() => transport.listConsoleCommands()}
+            onLoadCatalog={loadConsoleCatalog}
           />
         )}
         {view === 'terminal' && (
@@ -943,9 +1011,11 @@ function DomainPoolCombobox({
 
 function WebsitesView({
   transport,
+  projectKey,
   adminUrl,
 }: {
   transport: AgentTransport;
+  projectKey: string;
   adminUrl: string;
 }) {
   const { t } = useTranslation();
@@ -982,7 +1052,7 @@ function WebsitesView({
     }
   }, [transport]);
 
-  useEffect(() => { void refresh(); }, [refresh]);
+  useEffect(() => { void refresh(); }, [projectKey, refresh]);
 
   const onPoolChange = (value: string) => {
     setPoolId(value);
@@ -1456,7 +1526,17 @@ function SetupWizard({ initialConnection, initialConfig, onComplete }: {
       </section>
       <section className="setup-form-panel">
         <div className="setup-progress"><span className={step >= 0 ? 'active' : ''}>1</span><i /><span className={step >= 1 ? 'active' : ''}>2</span><i /><span className={step >= 2 ? 'active' : ''}>3</span></div>
-        {step === 0 && <div className="setup-step"><p className="eyebrow">01 / 03</p><h2>{t('setup.languageStep')}</h2><div className="language-grid">{Object.entries(localeCatalog).map(([locale, definition]) => <button key={locale} className={config.language === locale ? 'language-option selected' : 'language-option'} onClick={() => void chooseLocale(locale)}><strong>{definition.nativeLabel}</strong><small>{definition.label}</small></button>)}</div><button className="primary-button wide" onClick={() => setStep(1)}>{t('common.continue')} →</button></div>}
+        {step === 0 && <div className="setup-step"><p className="eyebrow">01 / 03</p><h2>{t('setup.languageStep')}</h2><div className="language-grid">{localeDisplayOrder.map((locale) => {
+          const definition = localeCatalog[locale];
+          const uiName = t(`languages.${locale}`);
+          const same = uiName.trim() === definition.nativeLabel.trim();
+          return (
+            <button key={locale} className={config.language === locale ? 'language-option selected' : 'language-option'} onClick={() => void chooseLocale(locale)}>
+              <strong>{uiName}</strong>
+              {!same && <small>({definition.nativeLabel})</small>}
+            </button>
+          );
+        })}</div><button className="primary-button wide" onClick={() => setStep(1)}>{t('common.continue')} →</button></div>}
         {step === 1 && <div className="setup-step"><p className="eyebrow">02 / 03</p><h2>{t('setup.connectionStep')}</h2><div className="connection-options"><button className={connection.mode === 'local' ? 'connection-option selected' : 'connection-option'} onClick={() => setConnection({ ...connection, mode: 'local' })}><span>⌂</span><strong>{t('setup.localTitle')}</strong><small>{t('setup.localText')}</small></button><button className={connection.mode === 'remote' ? 'connection-option selected' : 'connection-option'} onClick={() => setConnection({ ...connection, mode: 'remote' })}><span>⌁</span><strong>{t('setup.remoteTitle')}</strong><small>{t('setup.remoteText')}</small></button></div>{connection.mode === 'remote' && <div className="compact-fields"><label>{t('settings.agentUrl')}<input value={connection.agentUrl} onChange={(event) => setConnection({ ...connection, agentUrl: event.target.value })} placeholder="https://server.example.com:17640" /></label><label>{t('settings.token')}<input type="password" value={connection.token} onChange={(event) => setConnection({ ...connection, token: event.target.value })} /><small>{t('setup.tokenHint')}</small></label></div>}<div className="step-actions"><button className="text-button" onClick={() => setStep(0)}>← {t('common.back')}</button><button className="primary-button" onClick={() => setStep(2)}>{t('common.continue')} →</button></div></div>}
         {step === 2 && <div className="setup-step"><p className="eyebrow">03 / 03</p><h2>{t('setup.projectStep')}</h2><p className="setup-step-copy">{connection.mode === 'local' ? t('setup.scanHint') : t('setup.remoteProjectHint')}</p><ProjectPicker connection={connection} config={config} onConfig={setConfig} compact />{error && <p className="inline-error">{error}</p>}<div className="step-actions"><button className="text-button" onClick={() => setStep(1)}>← {t('common.back')}</button><button className="primary-button" onClick={() => void finish()} disabled={busy}>{busy ? t('common.loading') : t('setup.finish')} →</button></div></div>}
       </section>
@@ -1607,7 +1687,35 @@ function SettingsFields({ connection, config, onConnection, onConfig, compact = 
     <div className={compact ? 'settings-fields compact' : 'settings-fields'}>
       {!compact && <fieldset><legend>{t('settings.connection')}</legend><div className="segmented"><button type="button" className={connection.mode === 'local' ? 'active' : ''} onClick={() => onConnection({ ...connection, mode: 'local' })}>{t('settings.local')}</button><button type="button" className={connection.mode === 'remote' ? 'active' : ''} onClick={() => onConnection({ ...connection, mode: 'remote' })}>{t('settings.remote')}</button></div>{connection.mode === 'remote' && <div className="form-grid"><label>{t('settings.agentUrl')}<input value={connection.agentUrl} onChange={(event) => onConnection({ ...connection, agentUrl: event.target.value })} /></label><label>{t('settings.token')}<input type="password" value={connection.token} onChange={(event) => onConnection({ ...connection, token: event.target.value })} /></label></div>}</fieldset>}
       <ProjectPicker connection={connection} config={config} onConfig={onConfig} compact={compact} />
-      {!compact && <fieldset><legend>{t('settings.title')}</legend><div className="form-grid"><label>{t('settings.language')}<select value={config.language} onChange={(event) => onConfig({ ...config, language: event.target.value })}>{Object.entries(localeCatalog).map(([locale, definition]) => <option value={locale} key={locale}>{definition.nativeLabel}</option>)}</select></label><label>{t('settings.refresh')}<input type="number" min="1" max="300" value={config.refreshSeconds} onChange={(event) => onConfig({ ...config, refreshSeconds: Number(event.target.value) })} /></label></div></fieldset>}
+      {!compact && (
+        <fieldset>
+          <legend>{t('settings.title')}</legend>
+          <div className="form-grid">
+            <div className="settings-language-field">
+              <span className="settings-language-label">{t('settings.language')}</span>
+              <LanguageSwitcher
+                variant="field"
+                value={config.language}
+                onChange={(locale) => {
+                  const next = normalizeLocale(locale);
+                  onConfig({ ...config, language: next });
+                  void applyLocale(next);
+                }}
+              />
+            </div>
+            <label>
+              {t('settings.refresh')}
+              <input
+                type="number"
+                min="1"
+                max="300"
+                value={config.refreshSeconds}
+                onChange={(event) => onConfig({ ...config, refreshSeconds: Number(event.target.value) })}
+              />
+            </label>
+          </div>
+        </fieldset>
+      )}
     </div>
   );
 }

@@ -19,12 +19,14 @@
 - [ ] 回环 Web：agent 不可达时显示 OfflineGate，而不是「选择宿主」向导。
 - [ ] 网站 → 新建网站：主地址可搜索过滤域名池并点选创建。
 - [x] 命令控制台：`GET /api/v1/console/commands` 返回分组树（本机 333/112）；左侧可搜索/展开；单击填入、双击执行；仍拒绝 Shell 运算符（2026-10-07 Web）。
+- [x] 项目作用域：Host Profile 绑定 `frameworkRoot`；切换主机时先 `PUT /api/v1/config` 激活对应项目，再刷 snapshot/命令树/网站（同 Agent 多项目不再串台）。
+- [x] 顶栏/设置语言切换：可搜索自定义菜单（非原生 `<select>`）；10 语种；中文标题为「Weline 控制中心」；切换即 `applyLocale` 并写回 Agent `config.language`。
 
 ## 多机运维中枢（2026-10-06 Web 真机）
 
 验收 Host：`http://127.0.0.1:1420/`（Vite → Agent `127.0.0.1:17640`；桌面嵌入同一 Web）。
 
-- [x] 顶栏 Host Profile 切换器；设置可「添加远程主机」（Local + 远程 2）。
+- [x] 顶栏 Host Profile 切换器（可搜索自定义菜单，非原生 `<select>`）；设置可「添加远程主机」（Local + 远程 2）。
 - [x] 多机总览：本机卡片显示 CPU/内存/在线实例（真机拉 `/api/v1/snapshot`）。
 - [x] SSH 终端页：密钥表单 + session-only 提示；连接按钮在缺字段时禁用。
 - [x] `WS /api/v1/ssh/session`：坏 token → HTTP 401；有效 token 可升级 WebSocket。

@@ -33,11 +33,13 @@ function Page({
 export function ConsoleView({
   result,
   busy,
+  frameworkRoot,
   onRun,
   onLoadCatalog,
 }: {
   result: CommandResult | null;
   busy: boolean;
+  frameworkRoot: string;
   onRun: (command: string) => Promise<void>;
   onLoadCatalog: () => Promise<ConsoleCommandCatalog>;
 }) {
@@ -58,6 +60,7 @@ export function ConsoleView({
       setCatalogError('');
       setExpanded(preferredExpandedGroups(next.groups, query, selected));
     } catch (reason) {
+      setCatalog(null);
       setCatalogError(reason instanceof Error ? reason.message : String(reason));
     } finally {
       setCatalogBusy(false);
@@ -65,9 +68,14 @@ export function ConsoleView({
   };
 
   useEffect(() => {
+    setCatalog(null);
+    setCatalogError('');
+    setQuery('');
+    setSelected(null);
     void loadCatalog();
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- mount-only catalog fetch
-  }, []);
+    // Reload whenever the bound project changes (host/project switch).
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [frameworkRoot, onLoadCatalog]);
 
   const groups = useMemo(() => filterCommandCatalog(catalog, query), [catalog, query]);
 
@@ -103,7 +111,10 @@ export function ConsoleView({
   return (
     <Page title={t('console.title')} subtitle={t('console.subtitle')}>
       <div className="console-shell">
-        <div className="console-safety"><span>⌁</span>{t('console.safeBoundary')}</div>
+        <div className="console-safety">
+          <span>⌁</span>{t('console.safeBoundary')}
+          {frameworkRoot ? <code className="console-project" title={frameworkRoot}>{frameworkRoot}</code> : null}
+        </div>
         <div className="console-workspace">
           <aside className="command-browser" aria-label={t('console.treeTitle')}>
             <div className="command-browser-toolbar">

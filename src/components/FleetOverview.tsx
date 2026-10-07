@@ -67,8 +67,8 @@ export function FleetOverview({
         const host = card.snapshot?.host;
         const running = card.snapshot?.instances.filter((instance) => instance.isRunning).length ?? 0;
         const root = card.profile.id === activeId
-          ? (activeFrameworkRoot || card.snapshot?.frameworkRoot)
-          : card.snapshot?.frameworkRoot;
+          ? (activeFrameworkRoot || card.profile.frameworkRoot || card.snapshot?.frameworkRoot)
+          : (card.profile.frameworkRoot || card.snapshot?.frameworkRoot);
         const display = describeHostDisplay(card.profile, labels, root);
         return (
           <article
@@ -83,7 +83,7 @@ export function FleetOverview({
               <span className={`status-pill ${card.status}`}>{t(`fleet.${card.status}`)}</span>
             </header>
             <p className="fleet-meta">
-              {projectNameFromRoot(card.snapshot?.frameworkRoot) || card.profile.name}
+              {projectNameFromRoot(card.profile.frameworkRoot || card.snapshot?.frameworkRoot) || card.profile.name}
               {' · '}
               {card.profile.agentUrl || '—'}
             </p>

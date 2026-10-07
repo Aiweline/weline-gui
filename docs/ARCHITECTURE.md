@@ -89,10 +89,11 @@ flowchart LR
 
 ### 多机 Host Profile（客户端）
 
-- `localStorage.weline.hosts` + `weline.activeHostId`：多 Host Profile；每档含 Agent URL/token、可选 Framework API 站点账户、SSH 元数据与 `sshPrivateKeyRef`（**永不存 PEM**）。
+- `localStorage.weline.hosts` + `weline.activeHostId`：多 Host Profile；每档含 Agent URL/token、**绑定项目** `frameworkRoot`/`phpBinary`、可选 Framework API 站点账户、SSH 元数据与 `sshPrivateKeyRef`（**永不存 PEM**）。
+- **项目作用域（硬）**：Agent 进程内只有一份当前 `frameworkRoot`。切换 Host 时前端必须先按该 Profile 的 `frameworkRoot` 调用 `PUT /api/v1/config` 激活项目，再拉 snapshot / console / websites；禁止用上一项目的命令树或网站列表。
 - 私钥：Web 默认 `session_only` 内存；可选 WebCrypto 加密 IndexedDB；桌面后续 `os_keychain`。
 - Framework 业务 REST：GUI `FrameworkApiSdk` → 站点 `/api/api/rest/v1/auth/login`（账户登录，token 放 `sessionStorage` 按 profile 隔离）。
-- 内置终端：xterm.js → Agent `WS /api/v1/ssh/session` → OpenSSH PTY（仅公钥认证）。
+- 内置终端：xterm.js → Agent `WS /api/v1/ssh/session` → OpenSSH PTY（仅公钥认证）；本地 shell 默认 cwd 为当前绑定项目。
 
 访问令牌不会通过配置 API 返回。服务实例缓存 10 秒、证书探测缓存 60 秒，以避免高频执行框架命令或 TLS 握手。
 

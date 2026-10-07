@@ -1,9 +1,14 @@
 import { describe, expect, it } from 'vitest';
-import { localeCatalog } from './catalog';
+import { formatLanguageOptionLabel, localeCatalog, localeDisplayOrder } from './catalog';
 
 describe('locale catalog', () => {
   it('ships exactly ten mainstream languages', () => {
     expect(Object.keys(localeCatalog)).toHaveLength(10);
+  });
+
+  it('keeps Chinese product title as 控制中心', () => {
+    expect(localeCatalog['zh-CN'].messages.brand.product).toBe('控制中心');
+    expect(localeCatalog.en.messages.brand.product).toBe('Control Center');
   });
 
   it('marks Arabic as right-to-left and every locale has core navigation', () => {
@@ -55,5 +60,40 @@ describe('locale catalog', () => {
     expect(localeCatalog['zh-CN'].messages.common.reloadPage).toBe('刷新页面');
     expect(localeCatalog.en.messages.common.refresh).toBe('Refresh data');
     expect(localeCatalog['zh-CN'].messages.common.refresh).toBe('刷新数据');
+  });
+
+  it('localizes searchable host switcher copy', () => {
+    expect(localeCatalog.en.messages.hosts.search).toContain('Search');
+    expect(localeCatalog['zh-CN'].messages.hosts.search).toContain('搜索');
+    expect(localeCatalog['zh-CN'].messages.hosts.noMatch).toContain('没有匹配');
+  });
+
+  it('localizes searchable language switcher copy', () => {
+    expect(localeCatalog.en.messages.settings.languageSearch).toContain('Search');
+    expect(localeCatalog['zh-CN'].messages.settings.languageSearch).toContain('搜索');
+    expect(localeCatalog['zh-CN'].messages.settings.languageNoMatch).toContain('没有匹配');
+  });
+
+  it('names every catalog locale in the current UI language (incl. Japanese)', () => {
+    for (const [locale, definition] of Object.entries(localeCatalog)) {
+      const names = definition.messages.languages;
+      for (const code of Object.keys(localeCatalog)) {
+        expect(names[code as keyof typeof names], `${locale}.languages.${code}`).toBeTruthy();
+      }
+    }
+    expect(localeCatalog.ja.messages.languages.ja).toBe('日本語');
+    expect(localeCatalog.ja.messages.languages.en).toBe('英語');
+    expect(localeCatalog.ja.messages.languages['zh-CN']).toBe('中国語（簡体字）');
+    expect(localeCatalog.ja.messages.hosts.placeLocal).toBe('この端末');
+    expect(localeCatalog.ja.messages.common.reloadPage).toBe('ページを再読み込み');
+    expect(localeCatalog['zh-CN'].messages.languages.ja).toBe('日语');
+    // Switcher: current-UI name + target language native name (Framework LanguageSwitcher style).
+    expect(formatLanguageOptionLabel(localeCatalog.ja.messages.languages.de, localeCatalog.de.nativeLabel)).toBe('ドイツ語 (Deutsch)');
+    expect(formatLanguageOptionLabel(localeCatalog.ja.messages.languages.hi, localeCatalog.hi.nativeLabel)).toBe('ヒンディー語 (हिन्दी)');
+    expect(localeCatalog['zh-CN'].nativeLabel).toBe('中文');
+    expect(formatLanguageOptionLabel(localeCatalog.ja.messages.languages['zh-CN'], localeCatalog['zh-CN'].nativeLabel)).toBe('中国語（簡体字） (中文)');
+    expect(formatLanguageOptionLabel(localeCatalog.ja.messages.languages.ja, localeCatalog.ja.nativeLabel)).toBe('日本語');
+    expect(formatLanguageOptionLabel(localeCatalog['zh-CN'].messages.languages.de, localeCatalog.de.nativeLabel)).toBe('德语 (Deutsch)');
+    expect(localeDisplayOrder.slice(0, 3)).toEqual(['zh-CN', 'en', 'ja']);
   });
 });

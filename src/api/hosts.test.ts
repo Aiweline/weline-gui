@@ -3,6 +3,7 @@ import {
   connectionFromProfile,
   createBlankRemoteHost,
   describeHostDisplay,
+  filterHostsForSwitcher,
   getActiveHost,
   loadHosts,
   profileFromConnection,
@@ -11,6 +12,7 @@ import {
   setActiveHostId,
   upsertHost,
 } from './hosts';
+import type { HostProfile } from '../types';
 
 function installMemoryStorage() {
   const map = new Map<string, string>();
@@ -87,5 +89,59 @@ describe('hosts profiles', () => {
     expect(display.secondary).toContain('本机');
     expect(display.optionLabel).toContain('框架');
   });
+
+  it('uses each profile bound frameworkRoot when labeling non-active hosts', () => {
+    const gui = {
+      ...createBlankRemoteHost('GUI'),
+      kind: 'local' as const,
+      agentUrl: 'http://127.0.0.1:17640',
+      agentToken: 't',
+      frameworkRoot: '/Users/weline/Project/Official/框架GUI',
+      setupComplete: true,
+    };
+    const display = describeHostDisplay(gui, {
+      local: '本机',
+      remote: '远程',
+      unknownProject: '未配置项目',
+    });
+    expect(display.primary).toBe('框架GUI');
+    expect(display.optionLabel).toContain('框架GUI');
+  });
 });
 
+describe('filterHostsForSwitcher', () => {
+  const labels = { local: '本机', remote: '远程', unknownProject: '未配置项目' };
+  const hosts: HostProfile[] = [
+    {
+      id: 'local-1',
+      name: 'Local',
+      kind: 'local',
+      agentUrl: 'http://127.0.0.1:17640',
+      agentToken: 't',
+      setupComplete: true,
+      frameworkRoot: '/Users/weline/Project/Official/框架',
+    },
+    {
+      id: 'remote-1',
+      name: 'prod',
+      kind: 'remote',
+      agentUrl: 'https://edge.example.com:17640',
+      agentToken: 't',
+      setupComplete: true,
+      frameworkRoot: '/srv/weline/shop',
+    },
+  ];
+  const options = hosts.map((host) => ({
+    host,
+    display: describeHostDisplay(host, labels, host.frameworkRoot),
+  }));
+
+  it('returns all rows for blank query', () => {
+    expect(filterHostsForSwitcher(options, '  ')).toHaveLength(2);
+  });
+
+  it('matches project name and host address', () => {
+    expect(filterHostsForSwitcher(options, '框架').map((row) => row.host.id)).toEqual(['local-1']);
+    expect(filterHostsForSwitcher(options, 'edge.example').map((row) => row.host.id)).toEqual(['remote-1']);
+  });
+});

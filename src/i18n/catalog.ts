@@ -1,7 +1,22 @@
 import type { Direction } from '../types';
 
+const languageNamesEn: Record<string, string> = {
+  en: 'English',
+  'zh-CN': 'Chinese (Simplified)',
+  es: 'Spanish',
+  hi: 'Hindi',
+  ar: 'Arabic',
+  'pt-BR': 'Portuguese (Brazil)',
+  fr: 'French',
+  de: 'German',
+  ja: 'Japanese',
+  ko: 'Korean',
+};
+
 const en = {
   brand: { name: 'Weline', product: 'Control Center', agent: 'Host agent' },
+  /** Language option labels in the current UI language (not only native script). */
+  languages: languageNamesEn,
   navigation: {
     dashboard: 'Overview', fleet: 'Fleet', instances: 'WLS services', websites: 'Websites', sites: 'Domains & TLS',
     console: 'Command console', terminal: 'SSH terminal', panel: 'WLS panel', updates: 'Updates', settings: 'Settings',
@@ -69,7 +84,7 @@ const en = {
     safeBoundary: 'Framework CLI only · no shell', exitCode: 'Exit code {{code}}', empty: 'Run a framework command to see its output here.',
     treeTitle: 'Command tree', search: 'Search commands…', refreshTree: 'Refresh command tree',
     treeCount: '{{count}} commands', treeEmpty: 'Command tree not loaded', treeNoMatch: 'No matching commands',
-    treeHint: 'Click to fill the input. Double-click to run immediately.',
+    treeHint: 'Click to fill the input. Double-click to run immediately. Commands belong to the active project above.',
   },
   fleet: {
     title: 'Fleet overview', subtitle: 'Snapshots from every Host Profile. Switch without mixing tokens.',
@@ -101,6 +116,7 @@ const en = {
   hosts: {
     title: 'Host profiles', name: 'Profile name', addRemote: 'Add remote host', remove: 'Remove profile',
     remote: 'Remote', active: 'Active host',
+    search: 'Search hosts or projects…', noMatch: 'No matching hosts',
     placeLocal: 'This device', placeRemote: 'Remote', unknownProject: 'No project',
     apiTitle: 'Framework API SDK', siteBaseUrl: 'Site base URL', apiUsername: 'API username',
     apiPassword: 'API password', apiLoginPath: 'Login path', apiLogin: 'Sign in to Framework API',
@@ -121,6 +137,7 @@ const en = {
   },
   settings: {
     title: 'Settings', subtitle: 'Connection, project discovery and monitoring preferences.', language: 'Interface language',
+    languageSearch: 'Search languages…', languageNoMatch: 'No matching languages',
     frameworkRoot: 'Weline framework root', phpBinary: 'PHP binary', github: 'GitHub repository',
     githubHint: 'owner/repository', adminUrl: 'WLS admin panel URL', sites: 'Website URLs',
     sitesHint: 'One complete http(s) URL per line', refresh: 'Refresh interval (seconds)', connection: 'Client connection',
@@ -166,6 +183,7 @@ function merge(overrides: DeepPartial<Messages>): Messages {
     ...en,
     ...overrides,
     brand: { ...en.brand, ...overrides.brand },
+    languages: { ...en.languages, ...overrides.languages } as Record<string, string>,
     navigation: { ...en.navigation, ...overrides.navigation },
     common: { ...en.common, ...overrides.common },
     dashboard: { ...en.dashboard, ...overrides.dashboard },
@@ -199,8 +217,12 @@ export interface LocaleDefinition {
 export const localeCatalog: Record<string, LocaleDefinition> = {
   en: { label: 'English', nativeLabel: 'English', direction: 'ltr', messages: en },
   'zh-CN': {
-    label: 'Simplified Chinese', nativeLabel: '简体中文', direction: 'ltr', messages: merge({
+    label: 'Simplified Chinese', nativeLabel: '中文', direction: 'ltr', messages: merge({
       brand: { name: 'Weline', product: '控制中心', agent: '宿主代理' },
+      languages: {
+        en: '英语', 'zh-CN': '中文', es: '西班牙语', hi: '印地语', ar: '阿拉伯语',
+        'pt-BR': '葡萄牙语（巴西）', fr: '法语', de: '德语', ja: '日语', ko: '韩语',
+      },
       navigation: { dashboard: '总览', fleet: '多机', instances: 'WLS 服务', websites: '网站', sites: '域名与证书', console: '命令控制台', terminal: 'SSH 终端', panel: 'WLS 面板', updates: '版本更新', settings: '设置' },
       common: { online: '在线', offline: '离线', running: '运行中', stopped: '已停止', loading: '加载中', refresh: '刷新数据', reloadPage: '刷新页面', save: '保存设置', start: '启动', stop: '停止', restart: '重启', reload: '热重载', cancel: '取消', continue: '继续', back: '返回', noData: '暂无数据', copy: '复制', open: '打开' },
       dashboard: { eyebrow: '宿主实时指标', title: '一眼掌握 WLS 的全部状态。', subtitle: '在一个清晰界面中启动服务、查看每个 WLS 进程并监控宿主容量。', cpu: 'CPU 负载', memory: '内存', disk: '可用磁盘', network: '网络总量', uptime: '运行时间', onlineInstances: '在线实例', trackedProcesses: '监控进程', quickControl: '快捷控制', performance: '性能趋势', processTitle: 'WLS 进程拓扑', processHint: '已识别本机 Master、Worker 与配套服务。', lastUpdated: '最后更新', frameworkRoot: '框架目录', noRunning: '当前没有运行中的 WLS 实例。', modeLabel: '总览模式', modeCurrent: '当前主机', modeFleet: '多机监测', fleetHint: '在此监测全部 Host Profile；点选主机可进入该机实时详情。' },
@@ -213,7 +235,7 @@ export const localeCatalog: Record<string, LocaleDefinition> = {
         safeBoundary: '仅限框架 CLI · 无 Shell', exitCode: '退出码 {{code}}', empty: '运行框架命令后，输出会显示在这里。',
         treeTitle: '命令树', search: '搜索命令…', refreshTree: '刷新命令树',
         treeCount: '{{count}} 条命令', treeEmpty: '命令树尚未加载', treeNoMatch: '没有匹配的命令',
-        treeHint: '单击填入输入框；双击立即执行。',
+        treeHint: '单击填入输入框；双击立即执行。命令树与上方当前项目绑定。',
       },
       fleet: { title: '多机总览', subtitle: '每个 Host Profile 各自拉快照；切换时凭证互不串。', online: '在线', offline: '离线', loading: '检测中', switch: '切换到此机', active: '当前主机' },
       terminal: {
@@ -242,6 +264,7 @@ export const localeCatalog: Record<string, LocaleDefinition> = {
       hosts: {
         title: '主机配置档', name: '配置档名称', addRemote: '添加远程主机', remove: '删除配置档',
         remote: '远程', active: '当前主机',
+        search: '搜索主机或项目…', noMatch: '没有匹配的主机',
         placeLocal: '本机', placeRemote: '远程', unknownProject: '未配置项目',
         apiTitle: 'Framework API SDK', siteBaseUrl: '站点根地址', apiUsername: 'API 用户名',
         apiPassword: 'API 密码', apiLoginPath: '登录路径', apiLogin: '登录 Framework API',
@@ -250,20 +273,147 @@ export const localeCatalog: Record<string, LocaleDefinition> = {
       },
       panel: { title: 'WLS 管理面板', subtitle: '在新窗口打开设置中的后台地址。', missing: '请先在设置中填写 WLS 管理面板地址。', openExternalHint: '在新窗口打开 WLS 面板', openWindow: '打开 WLS 面板' },
       updates: { title: '版本更新', subtitle: '通过语义版本检查 GitHub 最新正式 Release。', check: '立即检查 GitHub', current: '已安装', latest: '最新版本', available: '发现新版本', currentStatus: '当前已是最新版', configure: '请先在设置中填写 owner/repository。', signed: '桌面更新包必须通过签名验证；绝不会安装未签名的 GitHub 资源。', releaseNotes: '更新说明' },
-      settings: { title: '设置', subtitle: '连接、项目发现与监控偏好。', language: '界面语言', frameworkRoot: 'Weline 框架目录', phpBinary: 'PHP 可执行文件', github: 'GitHub 仓库', githubHint: 'owner/repository', adminUrl: 'WLS 管理面板地址', sites: '网站地址', sitesHint: '每行一个完整 http(s) 地址', refresh: '刷新间隔（秒）', connection: '客户端连接', local: '本机/桌面', remote: '远程宿主代理', agentUrl: '代理地址', token: '访问令牌', saved: '设置已保存' },
+      settings: { title: '设置', subtitle: '连接、项目发现与监控偏好。', language: '界面语言', languageSearch: '搜索语言…', languageNoMatch: '没有匹配的语言', frameworkRoot: 'Weline 框架目录', phpBinary: 'PHP 可执行文件', github: 'GitHub 仓库', githubHint: 'owner/repository', adminUrl: 'WLS 管理面板地址', sites: '网站地址', sitesHint: '每行一个完整 http(s) 地址', refresh: '刷新间隔（秒）', connection: '客户端连接', local: '本机/桌面', remote: '远程宿主代理', agentUrl: '代理地址', token: '访问令牌', saved: '设置已保存' },
       setup: { badge: '首次安装向导', title: '把 Weline 宿主尽收眼底。', subtitle: '先选择语言，再连接运行 WLS 的机器。', languageStep: '选择语言', connectionStep: '选择宿主', projectStep: '配置项目', localTitle: '管理本机', localText: 'macOS、Windows 和 Linux 桌面可直接启停与监控本机 WLS。', remoteTitle: '连接服务器', remoteText: 'iOS、Android 或其他电脑请选择此项。', finish: '进入控制中心', tokenHint: '启动 weline-agent 时会在终端显示令牌。', scanHint: '本机模式会自动扫描。选中当前已启动的项目，也可以自定义新增。', remoteProjectHint: '线上模式才需要填写宿主代理地址和令牌；项目信息从那台服务器读取。', scanning: '正在扫描本机 Weline 项目…', scanEmpty: '没有扫到本机项目，请自定义新增。', scanRetry: '重新扫描', customAdd: '自定义新增', chooseScanned: '选择已扫描项目', running: '正在运行', found: '已找到 {{count}} 个项目', customPathHint: '填写包含 bin/w 的绝对路径', scanRequiresDesktop: '本机扫描需要桌面客户端（或本机已启动 weline-agent：127.0.0.1:17640）。请留在此选择列表，或点「自定义新增」。' },
       offline: { title: '无法连接宿主代理。', subtitle: '桌面与 Web 共用同一套 agent 数据。请先启动本机 agent——这不是重新配置项目。', heading: '先启动宿主代理', body: '打开桌面控制中心，或在框架GUI 目录运行 agent，然后重试。一般不需要重新走配置向导。', orDesktop: '或打开桌面控制中心', thenRetry: '回到本页点击「重试」。' },
       errors: { unavailable: '无法连接宿主代理。', retry: '重试', details: '详情', unauthorized: '访问令牌校验失败。' },
     })
   },
-  es: { label: 'Spanish', nativeLabel: 'Español', direction: 'ltr', messages: merge({ navigation: { dashboard: 'Resumen', instances: 'Servicios WLS', websites: 'Sitios', sites: 'Dominios y TLS', console: 'Consola', panel: 'Panel WLS', updates: 'Actualizaciones', settings: 'Ajustes' }, common: { online: 'En línea', offline: 'Sin conexión', running: 'En ejecución', stopped: 'Detenido', loading: 'Cargando', refresh: 'Actualizar', save: 'Guardar', start: 'Iniciar', stop: 'Detener', restart: 'Reiniciar', reload: 'Recarga', cancel: 'Cancelar', continue: 'Continuar', back: 'Atrás', noData: 'Sin datos', copy: 'Copiar', open: 'Abrir' }, dashboard: { title: 'Todo WLS de un vistazo.', subtitle: 'Inicia servicios, revisa procesos y supervisa el host desde una sola vista.' }, settings: { title: 'Ajustes', language: 'Idioma de la interfaz' }, setup: { title: 'Pon tu host Weline a la vista.', languageStep: 'Elegir idioma', connectionStep: 'Elegir host', projectStep: 'Configurar proyecto', finish: 'Abrir centro de control' } }) },
-  hi: { label: 'Hindi', nativeLabel: 'हिन्दी', direction: 'ltr', messages: merge({ navigation: { dashboard: 'अवलोकन', instances: 'WLS सेवाएँ', websites: 'वेबसाइटें', sites: 'डोमेन और TLS', console: 'कमांड कंसोल', panel: 'WLS पैनल', updates: 'अपडेट', settings: 'सेटिंग्स' }, common: { online: 'ऑनलाइन', offline: 'ऑफ़लाइन', running: 'चल रहा है', stopped: 'रुका हुआ', loading: 'लोड हो रहा है', refresh: 'रीफ़्रेश', save: 'सेटिंग्स सहेजें', start: 'शुरू करें', stop: 'रोकें', restart: 'पुनः शुरू', reload: 'हॉट रीलोड', cancel: 'रद्द करें', continue: 'जारी रखें', back: 'वापस', noData: 'कोई डेटा नहीं', copy: 'कॉपी', open: 'खोलें' }, dashboard: { title: 'WLS की पूरी स्थिति एक नज़र में।', subtitle: 'एक ही जगह से सेवा शुरू करें, प्रक्रियाएँ देखें और होस्ट क्षमता मॉनिटर करें।' }, settings: { title: 'सेटिंग्स', language: 'इंटरफ़ेस भाषा' }, setup: { title: 'अपने Weline होस्ट को नियंत्रण में लाएँ।', languageStep: 'भाषा चुनें', connectionStep: 'होस्ट चुनें', projectStep: 'प्रोजेक्ट कॉन्फ़िगर करें', finish: 'कंट्रोल सेंटर खोलें' } }) },
-  ar: { label: 'Arabic', nativeLabel: 'العربية', direction: 'rtl', messages: merge({ navigation: { dashboard: 'نظرة عامة', instances: 'خدمات WLS', websites: 'المواقع', sites: 'النطاقات وTLS', console: 'وحدة الأوامر', panel: 'لوحة WLS', updates: 'التحديثات', settings: 'الإعدادات' }, common: { online: 'متصل', offline: 'غير متصل', running: 'قيد التشغيل', stopped: 'متوقف', loading: 'جار التحميل', refresh: 'تحديث', save: 'حفظ الإعدادات', start: 'تشغيل', stop: 'إيقاف', restart: 'إعادة تشغيل', reload: 'إعادة تحميل', cancel: 'إلغاء', continue: 'متابعة', back: 'رجوع', noData: 'لا توجد بيانات', copy: 'نسخ', open: 'فتح' }, dashboard: { title: 'كل ما يحتاجه WLS في لمحة.', subtitle: 'شغّل الخدمات وراقب العمليات وموارد المضيف من واجهة واحدة.' }, settings: { title: 'الإعدادات', language: 'لغة الواجهة' }, setup: { title: 'ضع مضيف Weline أمامك.', languageStep: 'اختر اللغة', connectionStep: 'اختر المضيف', projectStep: 'إعداد المشروع', finish: 'فتح مركز التحكم' } }) },
-  'pt-BR': { label: 'Portuguese', nativeLabel: 'Português (Brasil)', direction: 'ltr', messages: merge({ navigation: { dashboard: 'Visão geral', instances: 'Serviços WLS', websites: 'Sites', sites: 'Domínios e TLS', console: 'Console', panel: 'Painel WLS', updates: 'Atualizações', settings: 'Configurações' }, common: { online: 'Online', offline: 'Offline', running: 'Em execução', stopped: 'Parado', loading: 'Carregando', refresh: 'Atualizar', save: 'Salvar', start: 'Iniciar', stop: 'Parar', restart: 'Reiniciar', reload: 'Recarregar', cancel: 'Cancelar', continue: 'Continuar', back: 'Voltar', noData: 'Sem dados', copy: 'Copiar', open: 'Abrir' }, dashboard: { title: 'Tudo do WLS em um só olhar.', subtitle: 'Inicie serviços, veja processos e monitore o host em uma única tela.' }, settings: { title: 'Configurações', language: 'Idioma da interface' }, setup: { title: 'Coloque seu host Weline à vista.', languageStep: 'Escolher idioma', connectionStep: 'Escolher host', projectStep: 'Configurar projeto', finish: 'Abrir central de controle' } }) },
-  fr: { label: 'French', nativeLabel: 'Français', direction: 'ltr', messages: merge({ navigation: { dashboard: 'Vue d’ensemble', instances: 'Services WLS', websites: 'Sites', sites: 'Domaines et TLS', console: 'Console', panel: 'Panneau WLS', updates: 'Mises à jour', settings: 'Réglages' }, common: { online: 'En ligne', offline: 'Hors ligne', running: 'Actif', stopped: 'Arrêté', loading: 'Chargement', refresh: 'Actualiser', save: 'Enregistrer', start: 'Démarrer', stop: 'Arrêter', restart: 'Redémarrer', reload: 'Recharger', cancel: 'Annuler', continue: 'Continuer', back: 'Retour', noData: 'Aucune donnée', copy: 'Copier', open: 'Ouvrir' }, dashboard: { title: 'Tout WLS en un coup d’œil.', subtitle: 'Démarrez les services, inspectez les processus et surveillez l’hôte depuis une seule vue.' }, settings: { title: 'Réglages', language: 'Langue de l’interface' }, setup: { title: 'Gardez votre hôte Weline en vue.', languageStep: 'Choisir la langue', connectionStep: 'Choisir l’hôte', projectStep: 'Configurer le projet', finish: 'Ouvrir le centre de contrôle' } }) },
-  de: { label: 'German', nativeLabel: 'Deutsch', direction: 'ltr', messages: merge({ navigation: { dashboard: 'Übersicht', instances: 'WLS-Dienste', websites: 'Websites', sites: 'Domains & TLS', console: 'Konsole', panel: 'WLS-Panel', updates: 'Updates', settings: 'Einstellungen' }, common: { online: 'Online', offline: 'Offline', running: 'Läuft', stopped: 'Gestoppt', loading: 'Lädt', refresh: 'Aktualisieren', save: 'Speichern', start: 'Starten', stop: 'Stoppen', restart: 'Neustart', reload: 'Neu laden', cancel: 'Abbrechen', continue: 'Weiter', back: 'Zurück', noData: 'Keine Daten', copy: 'Kopieren', open: 'Öffnen' }, dashboard: { title: 'Alles für WLS auf einen Blick.', subtitle: 'Dienste starten, Prozesse prüfen und den Host zentral überwachen.' }, settings: { title: 'Einstellungen', language: 'Oberflächensprache' }, setup: { title: 'Behalten Sie Ihren Weline-Host im Blick.', languageStep: 'Sprache wählen', connectionStep: 'Host wählen', projectStep: 'Projekt einrichten', finish: 'Kontrollzentrum öffnen' } }) },
-  ja: { label: 'Japanese', nativeLabel: '日本語', direction: 'ltr', messages: merge({ navigation: { dashboard: '概要', instances: 'WLS サービス', websites: 'サイト', sites: 'ドメインとTLS', console: 'コマンド', panel: 'WLS パネル', updates: 'アップデート', settings: '設定' }, common: { online: 'オンライン', offline: 'オフライン', running: '実行中', stopped: '停止', loading: '読み込み中', refresh: '更新', save: '設定を保存', start: '開始', stop: '停止', restart: '再起動', reload: 'ホットリロード', cancel: 'キャンセル', continue: '続行', back: '戻る', noData: 'データなし', copy: 'コピー', open: '開く' }, dashboard: { title: 'WLS のすべてを一目で。', subtitle: 'サービスの起動、プロセス確認、ホスト監視を一つの画面で。' }, settings: { title: '設定', language: '表示言語' }, setup: { title: 'Weline ホストを見える化します。', languageStep: '言語を選択', connectionStep: 'ホストを選択', projectStep: 'プロジェクト設定', finish: 'コントロールセンターを開く' } }) },
-  ko: { label: 'Korean', nativeLabel: '한국어', direction: 'ltr', messages: merge({ navigation: { dashboard: '개요', instances: 'WLS 서비스', websites: '웹사이트', sites: '도메인 및 TLS', console: '명령 콘솔', panel: 'WLS 패널', updates: '업데이트', settings: '설정' }, common: { online: '온라인', offline: '오프라인', running: '실행 중', stopped: '중지됨', loading: '불러오는 중', refresh: '새로고침', save: '설정 저장', start: '시작', stop: '중지', restart: '재시작', reload: '핫 리로드', cancel: '취소', continue: '계속', back: '뒤로', noData: '데이터 없음', copy: '복사', open: '열기' }, dashboard: { title: 'WLS 상태를 한눈에.', subtitle: '한 화면에서 서비스를 시작하고 프로세스와 호스트 성능을 확인하세요.' }, settings: { title: '설정', language: '인터페이스 언어' }, setup: { title: 'Weline 호스트를 한눈에 관리하세요.', languageStep: '언어 선택', connectionStep: '호스트 선택', projectStep: '프로젝트 구성', finish: '제어 센터 열기' } }) },
+  es: { label: 'Spanish', nativeLabel: 'Español', direction: 'ltr', messages: merge({
+    languages: {
+      en: 'Inglés', 'zh-CN': 'Chino (simplificado)', es: 'Español', hi: 'Hindi', ar: 'Árabe',
+      'pt-BR': 'Portugués (Brasil)', fr: 'Francés', de: 'Alemán', ja: 'Japonés', ko: 'Coreano',
+    },
+    navigation: { dashboard: 'Resumen', fleet: 'Flota', instances: 'Servicios WLS', websites: 'Sitios', sites: 'Dominios y TLS', console: 'Consola', terminal: 'Terminal SSH', panel: 'Panel WLS', updates: 'Actualizaciones', settings: 'Ajustes' },
+    common: { online: 'En línea', offline: 'Sin conexión', running: 'En ejecución', stopped: 'Detenido', loading: 'Cargando', refresh: 'Actualizar datos', reloadPage: 'Recargar página', save: 'Guardar', start: 'Iniciar', stop: 'Detener', restart: 'Reiniciar', reload: 'Recarga', cancel: 'Cancelar', continue: 'Continuar', back: 'Atrás', noData: 'Sin datos', copy: 'Copiar', open: 'Abrir' },
+    hosts: { placeLocal: 'Este dispositivo', placeRemote: 'Remoto', unknownProject: 'Sin proyecto', active: 'Host activo' },
+    dashboard: { title: 'Todo WLS de un vistazo.', subtitle: 'Inicia servicios, revisa procesos y supervisa el host desde una sola vista.' },
+    settings: { title: 'Ajustes', language: 'Idioma de la interfaz' },
+    setup: { title: 'Pon tu host Weline a la vista.', languageStep: 'Elegir idioma', connectionStep: 'Elegir host', projectStep: 'Configurar proyecto', finish: 'Abrir centro de control' },
+  }) },
+  hi: { label: 'Hindi', nativeLabel: 'हिन्दी', direction: 'ltr', messages: merge({
+    languages: {
+      en: 'अंग्रेज़ी', 'zh-CN': 'सरलीकृत चीनी', es: 'स्पेनिश', hi: 'हिन्दी', ar: 'अरबी',
+      'pt-BR': 'पुर्तगाली (ब्राज़ील)', fr: 'फ़्रेंच', de: 'जर्मन', ja: 'जापानी', ko: 'कोरियाई',
+    },
+    navigation: { dashboard: 'अवलोकन', fleet: 'मल्टी-होस्ट', instances: 'WLS सेवाएँ', websites: 'वेबसाइटें', sites: 'डोमेन और TLS', console: 'कमांड कंसोल', terminal: 'SSH टर्मिनल', panel: 'WLS पैनल', updates: 'अपडेट', settings: 'सेटिंग्स' },
+    common: { online: 'ऑनलाइन', offline: 'ऑफ़लाइन', running: 'चल रहा है', stopped: 'रुका हुआ', loading: 'लोड हो रहा है', refresh: 'डेटा रीफ़्रेश', reloadPage: 'पेज रीलोड', save: 'सेटिंग्स सहेजें', start: 'शुरू करें', stop: 'रोकें', restart: 'पुनः शुरू', reload: 'हॉट रीलोड', cancel: 'रद्द करें', continue: 'जारी रखें', back: 'वापस', noData: 'कोई डेटा नहीं', copy: 'कॉपी', open: 'खोलें' },
+    hosts: { placeLocal: 'यह डिवाइस', placeRemote: 'रिमोट', unknownProject: 'कोई प्रोजेक्ट नहीं', active: 'सक्रिय होस्ट' },
+    dashboard: { title: 'WLS की पूरी स्थिति एक नज़र में।', subtitle: 'एक ही जगह से सेवा शुरू करें, प्रक्रियाएँ देखें और होस्ट क्षमता मॉनिटर करें।' },
+    settings: { title: 'सेटिंग्स', language: 'इंटरफ़ेस भाषा' },
+    setup: { title: 'अपने Weline होस्ट को नियंत्रण में लाएँ।', languageStep: 'भाषा चुनें', connectionStep: 'होस्ट चुनें', projectStep: 'प्रोजेक्ट कॉन्फ़िगर करें', finish: 'कंट्रोल सेंटर खोलें' },
+  }) },
+  ar: { label: 'Arabic', nativeLabel: 'العربية', direction: 'rtl', messages: merge({
+    languages: {
+      en: 'الإنجليزية', 'zh-CN': 'الصينية المبسطة', es: 'الإسبانية', hi: 'الهندية', ar: 'العربية',
+      'pt-BR': 'البرتغالية (البرازيل)', fr: 'الفرنسية', de: 'الألمانية', ja: 'اليابانية', ko: 'الكورية',
+    },
+    navigation: { dashboard: 'نظرة عامة', fleet: 'الأسطول', instances: 'خدمات WLS', websites: 'المواقع', sites: 'النطاقات وTLS', console: 'وحدة الأوامر', terminal: 'طرفية SSH', panel: 'لوحة WLS', updates: 'التحديثات', settings: 'الإعدادات' },
+    common: { online: 'متصل', offline: 'غير متصل', running: 'قيد التشغيل', stopped: 'متوقف', loading: 'جار التحميل', refresh: 'تحديث البيانات', reloadPage: 'إعادة تحميل الصفحة', save: 'حفظ الإعدادات', start: 'تشغيل', stop: 'إيقاف', restart: 'إعادة تشغيل', reload: 'إعادة تحميل', cancel: 'إلغاء', continue: 'متابعة', back: 'رجوع', noData: 'لا توجد بيانات', copy: 'نسخ', open: 'فتح' },
+    hosts: { placeLocal: 'هذا الجهاز', placeRemote: 'بعيد', unknownProject: 'لا مشروع', active: 'المضيف النشط' },
+    dashboard: { title: 'كل ما يحتاجه WLS في لمحة.', subtitle: 'شغّل الخدمات وراقب العمليات وموارد المضيف من واجهة واحدة.' },
+    settings: { title: 'الإعدادات', language: 'لغة الواجهة' },
+    setup: { title: 'ضع مضيف Weline أمامك.', languageStep: 'اختر اللغة', connectionStep: 'اختر المضيف', projectStep: 'إعداد المشروع', finish: 'فتح مركز التحكم' },
+  }) },
+  'pt-BR': { label: 'Portuguese', nativeLabel: 'Português (Brasil)', direction: 'ltr', messages: merge({
+    languages: {
+      en: 'Inglês', 'zh-CN': 'Chinês (simplificado)', es: 'Espanhol', hi: 'Hindi', ar: 'Árabe',
+      'pt-BR': 'Português (Brasil)', fr: 'Francês', de: 'Alemão', ja: 'Japonês', ko: 'Coreano',
+    },
+    navigation: { dashboard: 'Visão geral', fleet: 'Frota', instances: 'Serviços WLS', websites: 'Sites', sites: 'Domínios e TLS', console: 'Console', terminal: 'Terminal SSH', panel: 'Painel WLS', updates: 'Atualizações', settings: 'Configurações' },
+    common: { online: 'Online', offline: 'Offline', running: 'Em execução', stopped: 'Parado', loading: 'Carregando', refresh: 'Atualizar dados', reloadPage: 'Recarregar página', save: 'Salvar', start: 'Iniciar', stop: 'Parar', restart: 'Reiniciar', reload: 'Recarregar', cancel: 'Cancelar', continue: 'Continuar', back: 'Voltar', noData: 'Sem dados', copy: 'Copiar', open: 'Abrir' },
+    hosts: { placeLocal: 'Este dispositivo', placeRemote: 'Remoto', unknownProject: 'Sem projeto', active: 'Host ativo' },
+    dashboard: { title: 'Tudo do WLS em um só olhar.', subtitle: 'Inicie serviços, veja processos e monitore o host em uma única tela.' },
+    settings: { title: 'Configurações', language: 'Idioma da interface' },
+    setup: { title: 'Coloque seu host Weline à vista.', languageStep: 'Escolher idioma', connectionStep: 'Escolher host', projectStep: 'Configurar projeto', finish: 'Abrir central de controle' },
+  }) },
+  fr: { label: 'French', nativeLabel: 'Français', direction: 'ltr', messages: merge({
+    languages: {
+      en: 'Anglais', 'zh-CN': 'Chinois (simplifié)', es: 'Espagnol', hi: 'Hindi', ar: 'Arabe',
+      'pt-BR': 'Portugais (Brésil)', fr: 'Français', de: 'Allemand', ja: 'Japonais', ko: 'Coréen',
+    },
+    navigation: { dashboard: 'Vue d’ensemble', fleet: 'Flotte', instances: 'Services WLS', websites: 'Sites', sites: 'Domaines et TLS', console: 'Console', terminal: 'Terminal SSH', panel: 'Panneau WLS', updates: 'Mises à jour', settings: 'Réglages' },
+    common: { online: 'En ligne', offline: 'Hors ligne', running: 'Actif', stopped: 'Arrêté', loading: 'Chargement', refresh: 'Actualiser les données', reloadPage: 'Recharger la page', save: 'Enregistrer', start: 'Démarrer', stop: 'Arrêter', restart: 'Redémarrer', reload: 'Recharger', cancel: 'Annuler', continue: 'Continuer', back: 'Retour', noData: 'Aucune donnée', copy: 'Copier', open: 'Ouvrir' },
+    hosts: { placeLocal: 'Cet appareil', placeRemote: 'Distant', unknownProject: 'Aucun projet', active: 'Hôte actif' },
+    dashboard: { title: 'Tout WLS en un coup d’œil.', subtitle: 'Démarrez les services, inspectez les processus et surveillez l’hôte depuis une seule vue.' },
+    settings: { title: 'Réglages', language: 'Langue de l’interface' },
+    setup: { title: 'Gardez votre hôte Weline en vue.', languageStep: 'Choisir la langue', connectionStep: 'Choisir l’hôte', projectStep: 'Configurer le projet', finish: 'Ouvrir le centre de contrôle' },
+  }) },
+  de: { label: 'German', nativeLabel: 'Deutsch', direction: 'ltr', messages: merge({
+    languages: {
+      en: 'Englisch', 'zh-CN': 'Chinesisch (vereinfacht)', es: 'Spanisch', hi: 'Hindi', ar: 'Arabisch',
+      'pt-BR': 'Portugiesisch (Brasilien)', fr: 'Französisch', de: 'Deutsch', ja: 'Japanisch', ko: 'Koreanisch',
+    },
+    navigation: { dashboard: 'Übersicht', fleet: 'Flotte', instances: 'WLS-Dienste', websites: 'Websites', sites: 'Domains & TLS', console: 'Konsole', terminal: 'SSH-Terminal', panel: 'WLS-Panel', updates: 'Updates', settings: 'Einstellungen' },
+    common: { online: 'Online', offline: 'Offline', running: 'Läuft', stopped: 'Gestoppt', loading: 'Lädt', refresh: 'Daten aktualisieren', reloadPage: 'Seite neu laden', save: 'Speichern', start: 'Starten', stop: 'Stoppen', restart: 'Neustart', reload: 'Neu laden', cancel: 'Abbrechen', continue: 'Weiter', back: 'Zurück', noData: 'Keine Daten', copy: 'Kopieren', open: 'Öffnen' },
+    hosts: { placeLocal: 'Dieses Gerät', placeRemote: 'Remote', unknownProject: 'Kein Projekt', active: 'Aktiver Host' },
+    dashboard: { title: 'Alles für WLS auf einen Blick.', subtitle: 'Dienste starten, Prozesse prüfen und den Host zentral überwachen.' },
+    settings: { title: 'Einstellungen', language: 'Oberflächensprache' },
+    setup: { title: 'Behalten Sie Ihren Weline-Host im Blick.', languageStep: 'Sprache wählen', connectionStep: 'Host wählen', projectStep: 'Projekt einrichten', finish: 'Kontrollzentrum öffnen' },
+  }) },
+  ja: { label: 'Japanese', nativeLabel: '日本語', direction: 'ltr', messages: merge({
+    brand: { name: 'Weline', product: 'コントロールセンター', agent: 'ホストエージェント' },
+    languages: {
+      en: '英語', 'zh-CN': '中国語（簡体字）', es: 'スペイン語', hi: 'ヒンディー語', ar: 'アラビア語',
+      'pt-BR': 'ポルトガル語（ブラジル）', fr: 'フランス語', de: 'ドイツ語', ja: '日本語', ko: '韓国語',
+    },
+    navigation: {
+      dashboard: '概要', fleet: 'マルチホスト', instances: 'WLS サービス', websites: 'サイト', sites: 'ドメインと TLS',
+      console: 'コマンドコンソール', terminal: 'SSH ターミナル', panel: 'WLS パネル', updates: 'アップデート', settings: '設定',
+    },
+    common: {
+      online: 'オンライン', offline: 'オフライン', running: '実行中', stopped: '停止', loading: '読み込み中',
+      refresh: 'データを更新', reloadPage: 'ページを再読み込み', save: '設定を保存', start: '開始', stop: '停止',
+      restart: '再起動', reload: 'ホットリロード', cancel: 'キャンセル', continue: '続行', back: '戻る',
+      noData: 'データなし', copy: 'コピー', open: '開く',
+    },
+    hosts: {
+      title: 'ホストプロファイル', name: 'プロファイル名', addRemote: 'リモートホストを追加', remove: 'プロファイルを削除',
+      remote: 'リモート', active: '現在のホスト', search: 'ホストまたはプロジェクトを検索…', noMatch: '一致するホストがありません',
+      placeLocal: 'この端末', placeRemote: 'リモート', unknownProject: 'プロジェクト未設定',
+    },
+    fleet: { title: 'マルチホスト概要', online: 'オンライン', offline: 'オフライン', loading: '確認中', switch: 'このホストに切り替え', active: '現在のホスト' },
+    dashboard: {
+      title: 'WLS のすべてを一目で。',
+      subtitle: 'サービスの起動、プロセス確認、ホスト監視を一つの画面で。',
+      onlineInstances: 'オンラインインスタンス',
+      modeCurrent: '現在のホスト',
+      modeFleet: '全ホスト監視',
+    },
+    settings: { title: '設定', language: '表示言語', languageSearch: '言語を検索…', languageNoMatch: '一致する言語がありません', local: 'この端末 / デスクトップ', remote: 'リモートホストエージェント' },
+    setup: {
+      title: 'Weline ホストを見える化します。', languageStep: '言語を選択', connectionStep: 'ホストを選択',
+      projectStep: 'プロジェクト設定', finish: 'コントロールセンターを開く',
+    },
+    console: {
+      title: 'フレームワークコマンドコンソール',
+      safeBoundary: 'フレームワーク CLI のみ · Shell 不可',
+      run: 'コマンドを実行', history: '最近の出力',
+      treeHint: 'クリックで入力欄へ。ダブルクリックで即実行。コマンドは上の現在プロジェクトに紐づきます。',
+    },
+  }) },
+  ko: { label: 'Korean', nativeLabel: '한국어', direction: 'ltr', messages: merge({
+    brand: { name: 'Weline', product: '제어 센터', agent: '호스트 에이전트' },
+    languages: {
+      en: '영어', 'zh-CN': '중국어(간체)', es: '스페인어', hi: '힌디어', ar: '아랍어',
+      'pt-BR': '포르투갈어(브라질)', fr: '프랑스어', de: '독일어', ja: '일본어', ko: '한국어',
+    },
+    navigation: {
+      dashboard: '개요', fleet: '멀티 호스트', instances: 'WLS 서비스', websites: '웹사이트', sites: '도메인 및 TLS',
+      console: '명령 콘솔', terminal: 'SSH 터미널', panel: 'WLS 패널', updates: '업데이트', settings: '설정',
+    },
+    common: {
+      online: '온라인', offline: '오프라인', running: '실행 중', stopped: '중지됨', loading: '불러오는 중',
+      refresh: '데이터 새로고침', reloadPage: '페이지 새로고침', save: '설정 저장', start: '시작', stop: '중지',
+      restart: '재시작', reload: '핫 리로드', cancel: '취소', continue: '계속', back: '뒤로',
+      noData: '데이터 없음', copy: '복사', open: '열기',
+    },
+    hosts: { placeLocal: '이 기기', placeRemote: '원격', unknownProject: '프로젝트 없음', active: '현재 호스트' },
+    dashboard: { title: 'WLS 상태를 한눈에.', subtitle: '한 화면에서 서비스를 시작하고 프로세스와 호스트 성능을 확인하세요.' },
+    settings: { title: '설정', language: '인터페이스 언어' },
+    setup: { title: 'Weline 호스트를 한눈에 관리하세요.', languageStep: '언어 선택', connectionStep: '호스트 선택', projectStep: '프로젝트 구성', finish: '제어 센터 열기' },
+  }) },
+
 };
 
 export function normalizeLocale(value: string): string {
@@ -272,3 +422,22 @@ export function normalizeLocale(value: string): string {
   const language = value.split('-')[0].toLowerCase();
   return Object.keys(localeCatalog).find((locale) => locale.split('-')[0].toLowerCase() === language) ?? 'en';
 }
+
+/**
+ * Like Framework LanguageSwitcher: current-UI name of the target locale,
+ * plus that target language's own native name in parentheses.
+ * Example (UI=ja): ドイツ語 (Deutsch); 中国語（簡体字） (中文); 日本語 (no paren when same).
+ */
+export function formatLanguageOptionLabel(uiName: string, nativeLabel: string): string {
+  const name = uiName.trim();
+  const native = nativeLabel.trim();
+  if (!native || name === native) return name;
+  return `${name} (${native})`;
+}
+
+/** Prefer zh-CN / en / ja near the top so source & common locales stay visible. */
+export const localeDisplayOrder: string[] = (() => {
+  const preferred = ['zh-CN', 'en', 'ja'];
+  const rest = Object.keys(localeCatalog).filter((code) => !preferred.includes(code));
+  return [...preferred, ...rest];
+})();
