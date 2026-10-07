@@ -27,13 +27,16 @@ export interface SshPrivateKeyRef {
   fingerprintSha256?: string;
 }
 
-/** Operator machine profile: agent + optional Framework API + SSH key ref (never PEM). */
+/** Operator machine profile: agent + bound project + optional Framework API + SSH key ref (never PEM). */
 export interface HostProfile {
   id: string;
   name: string;
   kind: 'local' | 'remote';
   agentUrl: string;
   agentToken: string;
+  /** Bound Weline project root on this host agent; switching hosts activates this project. */
+  frameworkRoot?: string;
+  phpBinary?: string;
   siteBaseUrl?: string;
   apiUsername?: string;
   apiLoginPath?: string;
