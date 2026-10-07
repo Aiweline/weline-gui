@@ -7,12 +7,14 @@ import {
   getActiveHost,
   getActiveHostId,
   loadHosts,
+  normalizeFrameworkRoot,
   projectNameFromRoot,
   removeHost,
   setActiveHostId as persistActiveHostId,
   upsertHost,
 } from './api/hosts';
 import { FrameworkApiSdk, clearFrameworkTokens, loadFrameworkTokens } from './api/frameworkSdk';
+import { activateHostProject } from './api/projectScope';
 import { AgentTransport, loadConnection, resolveLocalBootstrap, saveConnection } from './api/transport';
 import { backendDomainPoolUrl } from './api/projects';
 import { ConsoleView } from './components/ConsoleView';
@@ -86,9 +88,10 @@ export default function App() {
 
   const transport = useMemo(() => new AgentTransport(connection), [connection]);
 
-  const applyHost = useCallback((profile: HostProfile, nextConnection?: ClientConnection, frameworkRoot?: string) => {
+  const applyHost = useCallback((profile: HostProfile, nextConnection?: ClientConnection, frameworkRoot?: string, phpBinary?: string) => {
     const connectionValue = nextConnection || connectionFromProfile(profile);
-    const project = projectNameFromRoot(frameworkRoot);
+    const boundRoot = normalizeFrameworkRoot(frameworkRoot || profile.frameworkRoot);
+    const project = projectNameFromRoot(boundRoot);
     const genericName = !profile.name
       || /^local$/i.test(profile.name)
       || /^remote(\s+\d+)?$/i.test(profile.name)
@@ -100,6 +103,8 @@ export default function App() {
       agentUrl: connectionValue.agentUrl,
       agentToken: connectionValue.token,
       setupComplete: connectionValue.setupComplete,
+      frameworkRoot: boundRoot || undefined,
+      phpBinary: String(phpBinary || profile.phpBinary || '').trim() || undefined,
     };
     const nextHosts = upsertHost(merged);
     setHosts(nextHosts);
@@ -111,7 +116,7 @@ export default function App() {
 
   const switchHost = useCallback((id: string) => {
     const profile = hosts.find((host) => host.id === id);
-    if (!profile) return;
+    if (!profile || profile.id === activeHostId) return;
     persistActiveHostId(id);
     setActiveHostId(id);
     const next = connectionFromProfile(profile);
@@ -119,9 +124,11 @@ export default function App() {
     setConnection(next);
     setSnapshot(null);
     setHistory([]);
+    setConsoleResult(null);
+    setUpdateInfo(null);
     setError('');
     setView('dashboard');
-  }, [hosts]);
+  }, [activeHostId, hosts]);
 
   const reloadPage = useCallback(() => {
     window.location.reload();

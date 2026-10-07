@@ -55,7 +55,13 @@ export function loadHosts(): HostProfile[] {
   return [seed];
 }
 
+export function normalizeFrameworkRoot(path?: string | null): string {
+  return String(path || '').trim().replace(/[/\\]+$/, '').replace(/\\/g, '/');
+}
+
 function normalizeProfile(profile: HostProfile): HostProfile {
+  const frameworkRoot = normalizeFrameworkRoot(profile.frameworkRoot);
+  const phpBinary = String(profile.phpBinary || '').trim();
   return {
     ...profile,
     id: profile.id || newId(),
@@ -63,6 +69,8 @@ function normalizeProfile(profile: HostProfile): HostProfile {
     kind: profile.kind === 'remote' ? 'remote' : 'local',
     agentUrl: String(profile.agentUrl || DEFAULT_LOCAL_AGENT_URL),
     agentToken: String(profile.agentToken || ''),
+    frameworkRoot: frameworkRoot || undefined,
+    phpBinary: phpBinary || undefined,
     sshPort: profile.sshPort && profile.sshPort > 0 ? profile.sshPort : 22,
   };
 }
@@ -187,7 +195,7 @@ export function describeHostDisplay(
   const locationDetail = place === 'local'
     ? (agentHostLabel(profile.agentUrl) || '127.0.0.1')
     : (agentHostLabel(profile.agentUrl) || agentHostLabel(profile.siteBaseUrl) || profile.name || '');
-  const fromRoot = projectNameFromRoot(frameworkRoot);
+  const fromRoot = projectNameFromRoot(frameworkRoot || profile.frameworkRoot);
   const genericName = !profile.name
     || /^local$/i.test(profile.name)
     || /^remote(\s+\d+)?$/i.test(profile.name)
