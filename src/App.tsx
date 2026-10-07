@@ -204,25 +204,36 @@ export default function App() {
   useEffect(() => {
     if (!connection.setupComplete) return;
     let active = true;
-    void transport.config()
-      .then((next) => {
+    void (async () => {
+      try {
+        // Host switch / first paint: point the agent at this profile's bound project first.
+        const next = await activateHostProject(transport, activeHost);
         if (!active) return;
         setConfig(next);
         void applyLocale(next.language || i18n.language);
         const project = projectNameFromRoot(next.frameworkRoot);
-        const current = getActiveHost();
-        const genericName = !current.name
-          || /^local$/i.test(current.name)
-          || /^remote(\s+\d+)?$/i.test(current.name)
-          || /^远程(\s*\d+)?$/.test(current.name);
-        if (project && genericName) {
-          setHosts(upsertHost({ ...current, name: project }));
+        const genericName = !activeHost.name
+          || /^local$/i.test(activeHost.name)
+          || /^remote(\s+\d+)?$/i.test(activeHost.name)
+          || /^远程(\s*\d+)?$/.test(activeHost.name);
+        const boundRoot = normalizeFrameworkRoot(next.frameworkRoot);
+        const needsBind = boundRoot && normalizeFrameworkRoot(activeHost.frameworkRoot) !== boundRoot;
+        if (project && (genericName || needsBind || !activeHost.phpBinary)) {
+          setHosts(upsertHost({
+            ...activeHost,
+            name: genericName ? project : activeHost.name,
+            frameworkRoot: boundRoot || activeHost.frameworkRoot,
+            phpBinary: next.phpBinary || activeHost.phpBinary,
+          }));
         }
-      })
-      .catch((reason) => active && setError(messageOf(reason)));
-    void refreshSnapshot();
+        await refreshSnapshot(true);
+        if (active) setError('');
+      } catch (reason) {
+        if (active) setError(messageOf(reason));
+      }
+    })();
     return () => { active = false; };
-  }, [connection.setupComplete, i18n.language, refreshSnapshot, transport]);
+  }, [activeHost, connection.setupComplete, i18n.language, refreshSnapshot, transport]);
 
   useEffect(() => {
     if (!connection.setupComplete) return;
@@ -288,8 +299,9 @@ export default function App() {
       configured: Boolean(nextConfig.frameworkRoot || existing.frameworkRoot),
     });
     const finalized = { ...sessionConnection, setupComplete: true };
-    applyHost({ ...activeHost }, finalized, saved.frameworkRoot);
+    applyHost({ ...activeHost }, finalized, saved.frameworkRoot, saved.phpBinary);
     setConfig(saved);
+    setConsoleResult(null);
     await applyLocale(saved.language);
   };
 
@@ -300,8 +312,14 @@ export default function App() {
   ) => {
     const settingsTransport = new AgentTransport(nextConnection);
     const saved = await settingsTransport.saveConfig(nextConfig);
-    applyHost(nextProfile || { ...activeHost }, nextConnection, saved.frameworkRoot);
+    applyHost(
+      nextProfile || { ...activeHost },
+      nextConnection,
+      saved.frameworkRoot,
+      saved.phpBinary,
+    );
     setConfig(saved);
+    setConsoleResult(null);
     await applyLocale(saved.language);
     setError('');
   };
