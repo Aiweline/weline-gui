@@ -1,6 +1,6 @@
 [package]
 name = "weline-gui"
-version = "0.1.0"
+version = "0.2.0"
 description = "Cross-platform Weline WLS control center"
 authors = ["Weline"]
 edition = "2024"
