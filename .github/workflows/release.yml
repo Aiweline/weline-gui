@@ -22,7 +22,7 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - platform: macos-14
+          - platform: macos-15
             args: --bundles dmg,app
           - platform: ubuntu-22.04
             args: --bundles deb,appimage
