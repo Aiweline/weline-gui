@@ -234,6 +234,7 @@ export function TerminalView({
       await connectLocalShell();
       return;
     }
+    const gen = ++connectGenRef.current;
     setError('');
     if (!canConnect) {
       setError(t('terminal.missingFields'));
@@ -303,7 +304,12 @@ export function TerminalView({
         };
       });
 
-      wireSocketHandlers(ws, term);
+      if (gen !== connectGenRef.current) {
+        try { ws.close(); } catch { /* ignore */ }
+        return;
+      }
+
+      wireSocketHandlers(ws, term, gen);
       ws.send(JSON.stringify({
         type: 'connect',
         host: nextProfile.sshHost,
@@ -316,6 +322,7 @@ export function TerminalView({
         rows: term.rows,
       }));
     } catch (reason) {
+      if (gen !== connectGenRef.current) return;
       setStatus('error');
       const message = reason instanceof Error ? reason.message : String(reason);
       setError(message);
